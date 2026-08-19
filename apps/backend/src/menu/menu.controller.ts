@@ -4,6 +4,7 @@ import { RolesGuard } from '../auth/guards/roles.guard';
 import { Roles } from '../auth/decorators/roles.decorator';
 import { MenuService } from './menu.service';
 import { UpsertDishDto } from './dto/upsert-dish.dto';
+import { UpsertCategoryDto } from './dto/upsert-category.dto';
 
 @Controller()
 export class MenuController {
@@ -40,5 +41,26 @@ export class MenuController {
   @Delete('dishes/:id')
   deleteDish(@Param('id') id: string) {
     return this.menuService.deleteDish(id);
+  }
+
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('manager')
+  @Post('categories')
+  createCategory(@Body() dto: UpsertCategoryDto) {
+    return this.menuService.createCategory(dto);
+  }
+
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('manager')
+  @Put('categories/:id')
+  updateCategory(@Param('id') id: string, @Body() dto: UpsertCategoryDto) {
+    return this.menuService.updateCategory(id, dto);
+  }
+
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('manager')
+  @Delete('categories/:id')
+  deleteCategory(@Param('id') id: string) {
+    return this.menuService.deleteCategory(id);
   }
 }

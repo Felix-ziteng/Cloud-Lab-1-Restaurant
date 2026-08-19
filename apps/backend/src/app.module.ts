@@ -12,6 +12,8 @@ import { KitchenModule } from './kitchen/kitchen.module';
 import { DeliveryModule } from './delivery/delivery.module';
 import { ReservationsModule } from './reservations/reservations.module';
 import { StoreConfigModule } from './store-config/store-config.module';
+import { StaffModule } from './staff/staff.module';
+import { RidersModule } from './riders/riders.module';
 
 @Module({
   imports: [
@@ -26,6 +28,8 @@ import { StoreConfigModule } from './store-config/store-config.module';
     KitchenModule,
     DeliveryModule,
     ReservationsModule,
+    StaffModule,
+    RidersModule,
   ],
   controllers: [AppController],
   providers: [AppService],

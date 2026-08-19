@@ -55,8 +55,13 @@ POST /api/auth/rider/login   { pin }               -> { token }
 ### 桌台与会话
 
 ```
+GET   /api/tables                         桌台列表（含每桌当前会话/账单，前台看板用）
+POST/PUT/DELETE /api/tables               桌台/包间管理（仅 manager；删除要求桌台是空闲状态）
 POST  /api/table-sessions                 店员开台 { table_ids[], party_size }
 POST  /api/table-sessions/:id/merge       并台 { additional_table_ids[] }
+POST  /api/table-sessions/:id/unmerge     拆台 { table_id }（会话至少留一张桌，拆最后一张会被拒绝）
+POST  /api/table-sessions/:id/transfer    换桌 { from_table_id, to_table_id }（目标桌须空闲）
+PATCH /api/table-sessions/:id/party-size  改人数 { party_size }
 POST  /api/table-sessions/:id/close       发起清台（结账完成后调用）
 POST  /api/table-sessions/:table_id/join  顾客/桌台平板加入或自动开台 -> { session_token, order_id }
 POST  /api/tables/:id/clear               店员确认清台完成，status -> idle
@@ -68,19 +73,30 @@ POST  /api/tables/:id/clear               店员确认清台完成，status -> i
 GET   /api/menu                     菜单（顾客视角只见可售项；staff/manager 视角见全部）
 PATCH /api/dishes/:id/availability  售罄开关（普通店员即可，非敏感操作）
 POST/PUT/DELETE /api/dishes         菜品管理（仅 manager）
-POST/PUT/DELETE /api/categories     分类管理（仅 manager）
+POST/PUT/DELETE /api/categories     分类管理（仅 manager；删除要求分类下没有菜品）
+```
+
+### 员工 / 骑手账号
+
+```
+GET/POST/PUT /api/staff        员工账号管理（仅 manager；不能把系统里唯一在职的 manager 降级/停用）
+PATCH /api/staff/:id/pin       重置 PIN（仅 manager）
+GET/POST/PUT /api/riders       骑手账号管理（仅 manager，挂在 deliveryEnabled 开关下）
+PATCH /api/riders/:id/pin      重置 PIN（仅 manager）
 ```
 
 ### 订单
 
 ```
-POST /api/orders                       创建外卖/自提订单，或店员代客创建
-GET  /api/orders/:id                   查询订单（guest 仅限自己会话；staff/manager 不受限）
-POST /api/orders/:id/items             加菜（guest 或 staff）
-POST /api/orders/:id/submit            提交当前一轮点餐，推送厨房，生成 round_number
-POST /api/orders/:id/checkout-request  发起结账请求（guest 或 staff）
-POST /api/orders/:id/payments          记录收款（仅 staff）
-POST /api/orders/:id/price-adjustments 改价/打折/赠菜/作废（仅 manager）
+POST   /api/orders                       创建外卖/自提订单，或店员代客创建
+GET    /api/orders/:id                   查询订单（guest 仅限自己会话；staff/manager 不受限）
+POST   /api/orders/:id/items             加菜（guest 或 staff）
+PATCH  /api/orders/:id/items/:itemId     改购物车项数量（仅限还没提交给厨房的项）
+DELETE /api/orders/:id/items/:itemId     删除购物车项（仅限还没提交给厨房的项；已提交的走 price-adjustments 的 void）
+POST   /api/orders/:id/submit            提交当前一轮点餐，推送厨房，生成 round_number
+POST   /api/orders/:id/checkout-request  发起结账请求（guest 或 staff）
+POST   /api/orders/:id/payments          记录收款（仅 staff）
+POST   /api/orders/:id/price-adjustments 改价/打折/赠菜/作废（仅 manager；price_override 语义见 DATA_MODEL.md 3.6）
 ```
 
 ### 厨房

@@ -1,28 +1,47 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useParams } from 'react-router-dom';
-import type { Category } from '@restaurant/shared-types';
-import { api, setToken, getToken } from '../api/client';
+import type { MenuCategory, OrderDetail } from '@restaurant/shared-types';
+import { api, setToken } from '../api/client';
 
 // 顾客扫码 / 桌台平板共用的点餐页（见 ARCHITECTURE.md 2.4：两者是同一套代码、同一权限）
 export default function GuestOrderPage() {
   const { tableId } = useParams<{ tableId: string }>();
-  const [menu, setMenu] = useState<Category[]>([]);
+  const tokenKind = `guest:${tableId}`;
+
+  const [orderId, setOrderId] = useState<string | null>(null);
+  const [menu, setMenu] = useState<MenuCategory[]>([]);
+  const [order, setOrder] = useState<OrderDetail | null>(null);
+  const [cart, setCart] = useState<Record<string, number>>({});
   const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  // StrictMode 开发模式下同一个 effect 会故意触发两次；join 不是纯读操作（会在桌台空闲时建会话），
+  // 这个 ref 保证一次页面访问只真正 join 一次，不产生两个 token 互相覆盖 localStorage 的问题
+  const joinedRef = useRef(false);
+
+  const refreshOrder = useCallback(
+    async (id: string) => {
+      const detail = await api.get<OrderDetail>(`/orders/${id}`, tokenKind);
+      setOrder(detail);
+    },
+    [tokenKind],
+  );
 
   useEffect(() => {
-    if (!tableId) return;
+    if (!tableId || joinedRef.current) return;
+    joinedRef.current = true;
 
-    async function joinAndLoadMenu() {
+    async function joinAndLoad() {
       try {
-        if (!getToken('guestToken')) {
-          const { sessionToken } = await api.post<{ sessionToken: string; orderId: string }>(
-            `/table-sessions/${tableId}/join`,
-            {},
-          );
-          setToken('guestToken', sessionToken);
-        }
-        const categories = await api.get<Category[]>('/menu');
+        const joinRes = await api.post<{ sessionToken: string; orderId: string }>(
+          `/table-sessions/${tableId}/join`,
+          {},
+        );
+        setToken(tokenKind, joinRes.sessionToken);
+        setOrderId(joinRes.orderId);
+
+        const categories = await api.get<MenuCategory[]>('/menu');
         setMenu(categories);
+        await refreshOrder(joinRes.orderId);
       } catch (err) {
         if (err instanceof Error && err.message.includes('table_pending_clear')) {
           setError('请稍等，服务员正在清台');
@@ -32,20 +51,117 @@ export default function GuestOrderPage() {
       }
     }
 
-    joinAndLoadMenu();
+    joinAndLoad();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tableId]);
 
+  function addToCart(dishId: string, delta: number) {
+    setCart((prev) => {
+      const next = Math.max(0, (prev[dishId] ?? 0) + delta);
+      const updated = { ...prev, [dishId]: next };
+      if (next === 0) delete updated[dishId];
+      return updated;
+    });
+  }
+
+  async function submitCart() {
+    if (!orderId || Object.keys(cart).length === 0) return;
+    setBusy(true);
+    try {
+      const items = Object.entries(cart).map(([dishId, quantity]) => ({ dishId, quantity }));
+      await api.post(`/orders/${orderId}/items`, { items }, tokenKind);
+      await api.post(`/orders/${orderId}/submit`, {}, tokenKind);
+      setCart({});
+      await refreshOrder(orderId);
+    } catch {
+      setError('提交失败，请重试');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function requestCheckout() {
+    if (!orderId) return;
+    setBusy(true);
+    try {
+      await api.post(`/orders/${orderId}/checkout-request`, {}, tokenKind);
+      await refreshOrder(orderId);
+    } catch {
+      setError('结账请求失败，请重试');
+    } finally {
+      setBusy(false);
+    }
+  }
+
   if (error) return <p>{error}</p>;
+  if (!order) return <p>加载中…</p>;
+
+  const cartTotal = Object.entries(cart).reduce((sum, [dishId, qty]) => {
+    const dish = menu.flatMap((c) => c.dishes).find((d) => d.id === dishId);
+    return sum + (dish ? Number(dish.price) * qty : 0);
+  }, 0);
+
+  const kitchenStatusLabel: Record<string, string> = {
+    pending: '待处理',
+    preparing: '制作中',
+    done: '已完成',
+  };
 
   return (
     <div>
       <h1>桌台 {tableId}</h1>
-      {menu.map((category) => (
-        <section key={category.id}>
-          <h2>{category.name}</h2>
-          {/* TODO: 菜品列表、加入购物车、提交订单 —— 下一阶段实现 */}
+
+      {order.status === 'awaiting_payment' && <p>已发起结账，请等待店员到桌结账</p>}
+
+      <section>
+        <h2>菜单</h2>
+        {menu.map((category) => (
+          <div key={category.id}>
+            <h3>{category.name}</h3>
+            {category.dishes?.map((dish) => (
+              <div key={dish.id}>
+                <span>
+                  {dish.name} ¥{Number(dish.price).toFixed(2)}
+                </span>
+                <button onClick={() => addToCart(dish.id, -1)} disabled={!cart[dish.id]}>
+                  −
+                </button>
+                <span>{cart[dish.id] ?? 0}</span>
+                <button onClick={() => addToCart(dish.id, 1)}>+</button>
+              </div>
+            ))}
+          </div>
+        ))}
+      </section>
+
+      {Object.keys(cart).length > 0 && (
+        <section>
+          <p>待提交：¥{cartTotal.toFixed(2)}</p>
+          <button onClick={submitCart} disabled={busy}>
+            提交给厨房
+          </button>
         </section>
-      ))}
+      )}
+
+      <section>
+        <h2>本桌已点</h2>
+        {order.items.length === 0 && <p>还没有点菜</p>}
+        <ul>
+          {order.items.map((item) => (
+            <li key={item.id}>
+              {item.dishNameSnapshot} x{item.quantity}
+              {item.roundNumber === 0 ? '（未提交）' : `（${kitchenStatusLabel[item.kitchenStatus]}）`}
+            </li>
+          ))}
+        </ul>
+        <p>合计：¥{Number(order.total).toFixed(2)}</p>
+      </section>
+
+      {order.status === 'open' && order.items.some((i) => i.roundNumber > 0) && (
+        <button onClick={requestCheckout} disabled={busy}>
+          结账
+        </button>
+      )}
     </div>
   );
 }

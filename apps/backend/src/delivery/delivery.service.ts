@@ -10,6 +10,13 @@ export class DeliveryService {
   ) {}
 
   async assignRider(orderId: string, riderId: string) {
+    // 指派给一个已停用的骑手账号不会报错也不会真的送达——JwtAuthGuard 会挡掉停用账号的登录，
+    // 骑手压根看不到这单，店员却以为已经派出去了。提前查一遍，给一个能看懂的报错
+    const rider = await this.prisma.rider.findUnique({ where: { id: riderId } });
+    if (!rider || rider.status !== 'active') {
+      throw new NotFoundException('骑手账号不存在或已停用');
+    }
+
     const info = await this.prisma.deliveryInfo.update({
       where: { orderId },
       data: { riderId, status: 'assigned' },

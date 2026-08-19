@@ -20,6 +20,8 @@ export interface Table {
 
 export type TableSessionStatus = "open" | "pending_checkout" | "closed";
 
+// 概念型定义，实际接口目前都只返回它的精简/嵌套形式（见下面 TableWithSession），
+// 没有任何端点直接返回这个完整形状，`tableIds` 在真实查询里是通过关联表带出来的，不是一个直接字段
 export interface TableSession {
   id: string;
   tableIds: string[];
@@ -34,16 +36,18 @@ export interface TableSession {
 export type OrderType = "dine_in" | "takeout" | "delivery";
 export type OrderStatus = "open" | "awaiting_payment" | "paid" | "cancelled";
 
+// 金额字段是 Prisma Decimal，序列化成 JSON 时是字符串而不是 number（已用 curl 验证），
+// 前端要展示/计算时自己 Number(...) 转换，不要信 TS 的 number 直觉
 export interface Order {
   id: string;
   type: OrderType;
   tableSessionId: string | null;
   status: OrderStatus;
-  subtotal: number;
-  discountTotal: number;
-  total: number;
+  subtotal: string;
+  discountTotal: string;
+  total: string;
   createdByType: "customer" | "staff";
-  createdById: string | null;
+  createdByStaffId: string | null;
   customerContact: string | null;
   pickupTime: string | null;
   createdAt: string;
@@ -56,14 +60,15 @@ export interface OrderItem {
   orderId: string;
   dishId: string;
   dishNameSnapshot: string;
-  unitPriceSnapshot: number;
+  unitPriceSnapshot: string;
   quantity: number;
   notes: string | null;
   kitchenStatus: KitchenStatus;
   roundNumber: number;
+  submittedAt: string | null;
   isVoided: boolean;
   addedByType: "customer" | "staff";
-  addedById: string | null;
+  addedByStaffId: string | null;
   createdAt: string;
 }
 
@@ -73,11 +78,16 @@ export interface Category {
   sortOrder: number;
 }
 
+// GET /api/menu
+export interface MenuCategory extends Category {
+  dishes: Dish[];
+}
+
 export interface Dish {
   id: string;
   categoryId: string;
   name: string;
-  price: number;
+  price: string;
   description: string | null;
   imageUrl: string | null;
   isAvailable: boolean;
@@ -113,7 +123,7 @@ export interface DeliveryInfo {
   contactPhone: string;
   riderId: string | null;
   status: DeliveryStatus;
-  codAmount: number;
+  codAmount: string;
   paymentConfirmed: boolean;
   confirmedAt: string | null;
 }
@@ -124,9 +134,10 @@ export interface Payment {
   id: string;
   orderId: string;
   method: PaymentMethod;
-  amount: number;
+  amount: string;
   collectedByType: "staff" | "rider";
-  collectedById: string;
+  collectedByStaffId: string | null;
+  collectedByRiderId: string | null;
   collectedAt: string;
 }
 
@@ -137,7 +148,7 @@ export interface PriceAdjustment {
   orderId: string;
   orderItemId: string | null;
   type: PriceAdjustmentType;
-  amount: number;
+  amount: string;
   reason: string | null;
   approvedByStaffId: string;
   createdAt: string;
@@ -157,5 +168,51 @@ export interface Reservation {
   createdByStaffId: string;
   createdAt: string;
   arrivedAt: string | null;
-  sessionId: string | null;
+}
+
+// --- 组合响应类型：对应几个带 include 的读接口，见 API_DESIGN.md ---
+
+// GET /api/tables
+export interface TableWithSession extends Table {
+  activeSession: {
+    id: string;
+    partySize: number;
+    status: TableSessionStatus;
+    order: Order;
+  } | null;
+}
+
+// GET /api/orders/:id
+export interface OrderDetail extends Order {
+  items: OrderItem[];
+  payments: Payment[];
+  priceAdjustments: PriceAdjustment[];
+}
+
+// GET /api/order-items/queue
+export interface KitchenQueueItem extends OrderItem {
+  order: {
+    id: string;
+    type: OrderType;
+    tableSessionId: string | null;
+    tableSession: {
+      tables: { table: Pick<Table, "id" | "tableNumber"> }[];
+    } | null;
+  };
+}
+
+// GET /api/orders（店员视角，历史订单列表，精简版：只带表头信息，不带菜品明细）
+export interface OrderListItem extends Order {
+  tableSession: {
+    tables: { table: Pick<Table, "id" | "tableNumber"> }[];
+  } | null;
+  deliveryInfo:
+    | (DeliveryInfo & { rider: Pick<Rider, "id" | "name" | "status"> | null })
+    | null;
+}
+
+// GET /api/orders（骑手视角：只看分配给自己的配送单，带菜品明细，不带 tableSession）
+export interface RiderOrder extends Order {
+  items: OrderItem[];
+  deliveryInfo: DeliveryInfo | null;
 }

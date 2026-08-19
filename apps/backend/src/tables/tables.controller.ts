@@ -1,15 +1,49 @@
-import { Body, Controller, Param, Post, UseGuards } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Param, Patch, Post, Put, UseGuards } from '@nestjs/common';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
+import { RolesGuard } from '../auth/guards/roles.guard';
+import { Roles } from '../auth/decorators/roles.decorator';
 import { CurrentAuth } from '../auth/decorators/current-auth.decorator';
 import type { AuthPayload } from '../auth/auth.types';
 import { TablesService } from './tables.service';
 import { OpenTableSessionDto } from './dto/open-table-session.dto';
 import { MergeTableSessionDto } from './dto/merge-table-session.dto';
 import { JoinTableSessionDto } from './dto/join-table-session.dto';
+import { UpsertTableDto } from './dto/upsert-table.dto';
+import { UnmergeTableSessionDto } from './dto/unmerge-table-session.dto';
+import { TransferTableSessionDto } from './dto/transfer-table-session.dto';
+import { UpdatePartySizeDto } from './dto/update-party-size.dto';
 
 @Controller()
 export class TablesController {
   constructor(private readonly tablesService: TablesService) {}
+
+  @UseGuards(JwtAuthGuard)
+  @Get('tables')
+  list() {
+    return this.tablesService.list();
+  }
+
+  // 桌台/包间是门店"底图"数据，跟菜单目录价同级别，仅 manager 可维护
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('manager')
+  @Post('tables')
+  createTable(@Body() dto: UpsertTableDto) {
+    return this.tablesService.createTable(dto);
+  }
+
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('manager')
+  @Put('tables/:id')
+  updateTable(@Param('id') id: string, @Body() dto: UpsertTableDto) {
+    return this.tablesService.updateTable(id, dto);
+  }
+
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('manager')
+  @Delete('tables/:id')
+  deleteTable(@Param('id') id: string) {
+    return this.tablesService.deleteTable(id);
+  }
 
   @UseGuards(JwtAuthGuard)
   @Post('table-sessions')
@@ -23,6 +57,24 @@ export class TablesController {
   @Post('table-sessions/:id/merge')
   mergeSession(@Param('id') id: string, @Body() dto: MergeTableSessionDto) {
     return this.tablesService.mergeSession(id, dto);
+  }
+
+  @UseGuards(JwtAuthGuard)
+  @Post('table-sessions/:id/unmerge')
+  unmergeTable(@Param('id') id: string, @Body() dto: UnmergeTableSessionDto) {
+    return this.tablesService.unmergeTable(id, dto);
+  }
+
+  @UseGuards(JwtAuthGuard)
+  @Post('table-sessions/:id/transfer')
+  transferTable(@Param('id') id: string, @Body() dto: TransferTableSessionDto) {
+    return this.tablesService.transferTable(id, dto);
+  }
+
+  @UseGuards(JwtAuthGuard)
+  @Patch('table-sessions/:id/party-size')
+  updatePartySize(@Param('id') id: string, @Body() dto: UpdatePartySizeDto) {
+    return this.tablesService.updatePartySize(id, dto);
   }
 
   @UseGuards(JwtAuthGuard)
