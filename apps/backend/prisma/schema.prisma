@@ -8,6 +8,18 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
+// 门店能力配置：单店部署下是单行"单例"（固定 id = 1），决定这份部署要不要暴露
+// 厨房看板 / 外卖 / 预定这些可选模块。见 docs/ARCHITECTURE.md 关于产品化配置的决策。
+model StoreConfig {
+  id                 Int      @id @default(1)
+  kdsScreenEnabled   Boolean  @default(true)
+  deliveryEnabled    Boolean  @default(true)
+  reservationEnabled Boolean  @default(true)
+  updatedAt          DateTime @updatedAt
+
+  @@map("store_config")
+}
+
 enum TableStatus {
   idle
   occupied

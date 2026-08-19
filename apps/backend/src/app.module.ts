@@ -11,6 +11,7 @@ import { OrdersModule } from './orders/orders.module';
 import { KitchenModule } from './kitchen/kitchen.module';
 import { DeliveryModule } from './delivery/delivery.module';
 import { ReservationsModule } from './reservations/reservations.module';
+import { StoreConfigModule } from './store-config/store-config.module';
 
 @Module({
   imports: [
@@ -18,6 +19,7 @@ import { ReservationsModule } from './reservations/reservations.module';
     PrismaModule,
     AuthModule,
     RealtimeModule,
+    StoreConfigModule,
     TablesModule,
     MenuModule,
     OrdersModule,

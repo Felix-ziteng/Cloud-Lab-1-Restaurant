@@ -1,7 +1,8 @@
-import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { RealtimeGateway } from '../realtime/realtime.gateway';
 import { TablesService } from '../tables/tables.service';
+import { StoreConfigService } from '../store-config/store-config.service';
 import { CreateOrderDto } from './dto/create-order.dto';
 import { AddOrderItemsDto } from './dto/add-order-items.dto';
 import { RecordPaymentDto } from './dto/record-payment.dto';
@@ -13,12 +14,19 @@ export class OrdersService {
     private readonly prisma: PrismaService,
     private readonly realtime: RealtimeGateway,
     private readonly tablesService: TablesService,
+    private readonly storeConfigService: StoreConfigService,
   ) {}
 
   // V1 暂定：外卖/自提订单由店员在前台代客创建（POS 场景）。
   // 顾客在店外自助下单外卖/自提，目前还没有对应的身份/令牌模型（见 DATA_MODEL.md 待确认事项），
   // 是下一阶段需要单独设计的缺口，先不在这里假装实现。
   async createStandaloneOrder(dto: CreateOrderDto, staffId: string) {
+    // delivery 专属接口（分配骑手/更新状态等）挂了 deliveryEnabled 开关，
+    // 但创建订单本身走的是这个通用入口，得在这里单独补一道，否则开关形同虚设
+    if (dto.type === 'delivery' && !(await this.storeConfigService.isEnabled('deliveryEnabled'))) {
+      throw new ForbiddenException('该门店未启用外卖配送功能');
+    }
+
     const dishes = await this.prisma.dish.findMany({ where: { id: { in: dto.items.map((i) => i.dishId) } } });
 
     return this.prisma.$transaction(async (tx) => {

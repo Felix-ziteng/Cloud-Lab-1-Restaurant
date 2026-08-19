@@ -2,12 +2,15 @@ import { Body, Controller, ForbiddenException, Get, Param, Patch, Post, UseGuard
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { CurrentAuth } from '../auth/decorators/current-auth.decorator';
 import type { AuthPayload } from '../auth/auth.types';
+import { FeatureEnabledGuard } from '../store-config/guards/feature-enabled.guard';
+import { RequireFeature } from '../store-config/decorators/require-feature.decorator';
 import { ReservationsService } from './reservations.service';
 import { CreateReservationDto } from './dto/create-reservation.dto';
 import { ArriveReservationDto } from './dto/arrive-reservation.dto';
 
 @Controller('reservations')
-@UseGuards(JwtAuthGuard)
+@UseGuards(JwtAuthGuard, FeatureEnabledGuard)
+@RequireFeature('reservationEnabled')
 export class ReservationsController {
   constructor(private readonly reservationsService: ReservationsService) {}
 

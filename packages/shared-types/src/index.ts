@@ -1,6 +1,13 @@
 // 与 docs/DATA_MODEL.md 对应的共享类型定义。
 // 后端（Prisma 生成的类型）与前端共用这些类型，避免接口契约漂移。
 
+// 门店能力配置：决定这份部署要不要暴露厨房看板 / 外卖 / 预定这些可选模块
+export interface StoreConfig {
+  kdsScreenEnabled: boolean;
+  deliveryEnabled: boolean;
+  reservationEnabled: boolean;
+}
+
 export type TableStatus = "idle" | "occupied" | "pending_clear";
 
 export interface Table {

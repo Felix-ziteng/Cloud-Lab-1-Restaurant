@@ -176,7 +176,22 @@ erDiagram
 | note | |
 | created_by | 关联 `StaffAccount` |
 | created_at / arrived_at | |
-| session_id | 到店开台后关联的 `TableSession`，可空 |
+
+> 到店开台后与 `TableSession` 的关联，外键实际落在 `TableSession.reservation_id`（见上文 TableSession 定义），`Reservation` 侧没有单独的 `session_id` 字段，通过反向关系查询。
+
+### StoreConfig 门店能力配置
+
+单店部署下是固定单行（id 恒为 1），决定这份部署要不要暴露厨房看板 / 外卖 / 预定这几个可选模块。见 [ARCHITECTURE.md](./ARCHITECTURE.md) 2.7"产品化：用运行时配置覆盖客户差异"。
+
+| 字段 | 说明 |
+|---|---|
+| id | 恒为 1 |
+| kds_screen_enabled | 是否启用厨房电子看板 |
+| delivery_enabled | 是否启用外卖/配送模块 |
+| reservation_enabled | 是否启用预定模块 |
+| updated_at | |
+
+> 桌台平板 vs 顾客自行扫码不需要开关——两者是同一套代码的同一个入口，纯属客户硬件采购决策。打印机相关的配置（打印站点、路由规则）尚未设计，见 ARCHITECTURE.md 2.7"暂缓的部分"。
 
 ## 3. 关键设计决策
 

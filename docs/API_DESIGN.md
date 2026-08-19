@@ -91,13 +91,27 @@ PATCH /api/order-items/:id/kitchen-status   { status: preparing | done }（KDS �
 
 ### 配送
 
+> 整个分组挂在 `deliveryEnabled` 开关下（见门店能力配置），未启用时这些接口整体不可用；
+> `POST /api/orders` 创建 `type=delivery` 订单时也会单独校验这个开关，不止靠下面这几个专属接口把关。
+
 ```
 POST  /api/orders/:id/delivery/assign          分配骑手（staff）{ rider_id }
 PATCH /api/orders/:id/delivery/status          配送状态更新（rider，仅限分配给自己的单）
 POST  /api/orders/:id/delivery/confirm-payment 骑手确认已收款（rider）
 ```
 
+### 门店能力配置
+
+对应 ARCHITECTURE.md 2.7"产品化：用运行时配置覆盖客户差异"——决定这份部署要不要暴露厨房看板 / 外卖 / 预定模块，同一套代码靠这个配置适配不同客户。
+
+```
+GET   /api/store-config    读取当前门店能力配置（无需登录：所有终端启动时都要读它来决定展示哪些功能，内容不敏感）
+PATCH /api/store-config    更新配置（仅 manager）
+```
+
 ### 预定
+
+> 整个分组挂在 `reservationEnabled` 开关下，未启用时这些接口整体不可用。
 
 ```
 POST/GET/PATCH /api/reservations       预定管理（staff）

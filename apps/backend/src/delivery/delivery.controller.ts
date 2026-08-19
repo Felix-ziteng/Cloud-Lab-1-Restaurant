@@ -2,10 +2,15 @@ import { Body, Controller, ForbiddenException, Param, Patch, Post, UseGuards } f
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { CurrentAuth } from '../auth/decorators/current-auth.decorator';
 import type { AuthPayload } from '../auth/auth.types';
+import { FeatureEnabledGuard } from '../store-config/guards/feature-enabled.guard';
+import { RequireFeature } from '../store-config/decorators/require-feature.decorator';
 import { DeliveryService } from './delivery.service';
 import { AssignRiderDto } from './dto/assign-rider.dto';
 import { UpdateDeliveryStatusDto } from './dto/update-delivery-status.dto';
 
+// 整个控制器都挂在 deliveryEnabled 开关下：这家店没开外卖模块，这些接口直接不可用
+@UseGuards(FeatureEnabledGuard)
+@RequireFeature('deliveryEnabled')
 @Controller('orders/:orderId/delivery')
 export class DeliveryController {
   constructor(private readonly deliveryService: DeliveryService) {}

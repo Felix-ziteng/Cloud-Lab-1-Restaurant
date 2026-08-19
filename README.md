@@ -14,20 +14,26 @@ packages/
 
 ## 本地开发
 
-需要一个可访问的 PostgreSQL 实例（本地安装或容器均可，V1 部署形态见 [ARCHITECTURE.md](docs/ARCHITECTURE.md)）。
+需要一个可访问的 PostgreSQL 实例（本地安装或容器均可，V1 部署形态见 [ARCHITECTURE.md](docs/ARCHITECTURE.md)）。仓库根目录的 `docker-compose.yml` 提供了一个开箱即用的本地 Postgres。
 
 ```bash
 npm install
 
+# 起本地数据库（首次会自动拉镜像）
+docker compose up -d
+
 # 首次运行：配置数据库连接
 cp apps/backend/.env.example apps/backend/.env
-# 编辑 apps/backend/.env 中的 DATABASE_URL
+# .env.example 里的 DATABASE_URL 已经和 docker-compose.yml 的账号密码一致，一般不用改
 
 # 构建共享类型包（backend/frontend 依赖它的编译产物）
 npm run build --workspace=packages/shared-types
 
 # 建表
 npm run prisma:migrate --workspace=apps/backend
+
+# 灌入测试数据（几个菜品分类/菜品、一个店长账号 PIN=9999、一个普通店员账号 PIN=1234）
+npm run prisma:seed --workspace=apps/backend
 
 # 启动后端（http://localhost:3000/api）
 npm run dev:backend
