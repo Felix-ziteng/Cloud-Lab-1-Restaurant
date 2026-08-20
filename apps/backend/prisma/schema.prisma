@@ -18,6 +18,8 @@ model StoreConfig {
   // 才单独为那家店的部署打开——见跟用户的决策记录（2026-08-20）
   deliveryEnabled    Boolean  @default(false)
   reservationEnabled Boolean  @default(false)
+  // 界面视觉主题，店长在前台"门店设置"里切换，顾客端/厨房端/前台共用同一份配置
+  uiTheme            String   @default("modern")
   updatedAt          DateTime @updatedAt
 
   @@map("store_config")
@@ -102,6 +104,17 @@ enum ReservationStatus {
   no_show
 }
 
+enum PrintJobType {
+  kitchen
+  receipt
+}
+
+enum PrintJobStatus {
+  pending
+  printed
+  failed
+}
+
 model Table {
   id          String      @id @default(uuid())
   tableNumber String      @unique
@@ -166,8 +179,27 @@ model Order {
   payments         Payment[]
   priceAdjustments PriceAdjustment[]
   deliveryInfo     DeliveryInfo?
+  printJobs        PrintJob[]
 
   @@map("orders")
+}
+
+// 打印队列：ARCHITECTURE.md 2.7 "打印代理" 的落地——payload 是下单/收款那一刻的快照
+// （菜名、数量、金额等都存成 JSON），打印代理不需要反查订单当前状态，即使订单后续被改价/
+// 作废也不影响这张已经生成的小票内容。status 支持失败重试：打印代理本地服务离线/重启时，
+// 靠 GET /print-jobs/pending 补打漏掉的任务，不完全依赖 WebSocket 这种"发了就忘"的通知。
+model PrintJob {
+  id           String         @id @default(uuid())
+  type         PrintJobType
+  orderId      String
+  order        Order          @relation(fields: [orderId], references: [id])
+  payload      Json
+  status       PrintJobStatus @default(pending)
+  errorMessage String?
+  createdAt    DateTime       @default(now())
+  printedAt    DateTime?
+
+  @@map("print_jobs")
 }
 
 model OrderItem {

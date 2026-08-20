@@ -17,8 +17,7 @@
 |---|---|---|
 | 桌台会话（顾客手机 / 桌台平板） | 加入会话时换取的 session token | 只能读写自己绑定的 `table_session_id` / `order_id`，看不到别的桌 |
 | 店员 / 店长账号 | PIN 码登录换取的 JWT，带 `role` | `staff` 看不到敏感操作接口；`manager` 额外解锁改价/打折/作废/菜单管理 |
-| 配送员账号 | PIN 码登录换取的 JWT | 只能操作分配给自己的配送单 |
-| 厨房 KDS | 站点级访问，无个人登录 | 只能读写厨房相关接口，不做个人身份区分（标记完成不属于敏感操作，不需要个人追责） |
+| 厨房 KDS | 复用店员 PIN 登录换取的同一种 JWT | 标记完成不属于敏感操作，不需要单独的站点级令牌/个人追责，直接借用店员账号体系即可（决策记录：曾设想过无个人登录的站点级令牌，评估后认为收益不足以撑起单独的签发/预配置流程，维持现状） |
 
 **决策记录：店员/店长登录用 PIN 码。** 理由：前台/桌台等共享硬件上切换操作人非常频繁，PIN 码输入快、无需记忆复杂密码，比工号+密码更适合这个场景。
 
@@ -39,9 +38,9 @@
 | 房间 | 订阅方 | 收到的事件 |
 |---|---|---|
 | `table:{table_session_id}` | 该桌所有设备（顾客手机 + 桌台平板） | `item_added` `item_status_changed` `checkout_requested` `order_paid` |
-| `kitchen` | 所有 KDS 设备 | `new_order_item` `item_status_changed` |
-| `frontdesk` | 前台/管理终端 | `table_status_changed` `checkout_requested` `reservation_reminder` |
-| `delivery:{rider_id}` | 对应骑手 | `delivery_assigned` `delivery_status_changed` |
+| `order:{order_id}` | 该订单的顾客设备——外卖/自提顾客自助下单没有桌台可绑定，走这个房间（guest token 的 `tableSessionId` 为空，见 2. 身份与会话模型） | `item_added` `item_status_changed` `order_paid` `order_updated` |
+| `kitchen` | 所有 KDS 设备（复用店员登录）+ 打印代理（`apps/print-agent`，用 `PRINT_AGENT_TOKEN` 直连，不是 JWT） | `new_order_item` `item_status_changed` `print_job_created` |
+| `frontdesk` | 前台/管理终端 | `table_status_changed` `checkout_requested` `reservation_reminder` `delivery_status_changed` |
 
 ## 5. 核心 REST 端点
 
@@ -49,7 +48,6 @@
 
 ```
 POST /api/auth/staff/login   { pin }              -> { token, role }
-POST /api/auth/rider/login   { pin }               -> { token }
 ```
 
 ### 桌台与会话
@@ -76,19 +74,23 @@ POST/PUT/DELETE /api/dishes         菜品管理（仅 manager）
 POST/PUT/DELETE /api/categories     分类管理（仅 manager；删除要求分类下没有菜品）
 ```
 
-### 员工 / 骑手账号
+### 员工账号
 
 ```
 GET/POST/PUT /api/staff        员工账号管理（仅 manager；不能把系统里唯一在职的 manager 降级/停用）
-PATCH /api/staff/:id/pin       重置 PIN（仅 manager）
-GET/POST/PUT /api/riders       骑手账号管理（仅 manager，挂在 deliveryEnabled 开关下）
-PATCH /api/riders/:id/pin      重置 PIN（仅 manager）
+PATCH /api/staff/:id/pin       重置 PIN（仅 manager；新 PIN 撞上其他在职账号会被拒绝，见决策记录）
 ```
+
+> 决策记录：曾经有独立的骑手账号体系（`GET/POST/PUT /api/riders`），已经整体下线——V1
+> 没有配送员这个角色，配送由普通店员完成，见 DATA_MODEL.md 关于 `Rider` 实体的说明。
 
 ### 订单
 
 ```
 POST   /api/orders                       创建外卖/自提订单，或店员代客创建
+POST   /api/orders/guest                 顾客自助下单外卖/自提（公开接口，挂 deliveryEnabled 开关）-> { orderId, token, order }
+GET    /api/orders/lookup                订单号 + 手机号找回顾客自助下单的 token（公开接口，挂 deliveryEnabled 开关）
+GET    /api/orders                       历史订单列表（仅 staff），可选 status/type/limit/from/to 筛选，from/to 是报表"点某天看当天订单"下钻用的
 GET    /api/orders/:id                   查询订单（guest 仅限自己会话；staff/manager 不受限）
 POST   /api/orders/:id/items             加菜（guest 或 staff）
 PATCH  /api/orders/:id/items/:itemId     改购物车项数量（仅限还没提交给厨房的项）
@@ -96,25 +98,28 @@ DELETE /api/orders/:id/items/:itemId     删除购物车项（仅限还没提交
 POST   /api/orders/:id/submit            提交当前一轮点餐，推送厨房，生成 round_number
 POST   /api/orders/:id/checkout-request  发起结账请求（guest 或 staff）
 POST   /api/orders/:id/payments          记录收款（仅 staff）
+POST   /api/orders/:id/cancel            取消订单（仅 manager；已支付的订单不能取消）——已实现但暂无前端入口，见 docs/OPTIONAL_MODULES.md
 POST   /api/orders/:id/price-adjustments 改价/打折/赠菜/作废（仅 manager；price_override 语义见 DATA_MODEL.md 3.6）
 ```
 
 ### 厨房
 
 ```
-PATCH /api/order-items/:id/kitchen-status   { status: preparing | done }（KDS 站点级）
+GET   /api/order-items/queue                出品队列（staff，KDS 复用店员登录，见 2. 身份与会话模型）
+PATCH /api/order-items/:id/kitchen-status   { status: preparing | done }（staff）
 ```
 
 ### 配送
 
 > 整个分组挂在 `deliveryEnabled` 开关下（见门店能力配置），未启用时这些接口整体不可用；
-> `POST /api/orders` 创建 `type=delivery` 订单时也会单独校验这个开关，不止靠下面这几个专属接口把关。
+> `POST /api/orders`/`POST /api/orders/guest` 创建 `type=delivery` 订单时也会单独校验这个开关，
+> 不止靠下面这个专属接口把关。V1 没有骑手账号体系，配送由普通店员完成，不需要"分配"这一步。
 
 ```
-POST  /api/orders/:id/delivery/assign          分配骑手（staff）{ rider_id }
-PATCH /api/orders/:id/delivery/status          配送状态更新（rider，仅限分配给自己的单）
-POST  /api/orders/:id/delivery/confirm-payment 骑手确认已收款（rider）
+PATCH /api/orders/:orderId/delivery/status   配送状态更新（staff）{ status: delivering | delivered }
 ```
+
+收款走通用的 `POST /api/orders/:id/payments`（见上面"订单"分组），不需要单独的配送收款确认接口。
 
 ### 门店能力配置
 
@@ -130,18 +135,36 @@ PATCH /api/store-config    更新配置（仅 manager）
 > 整个分组挂在 `reservationEnabled` 开关下，未启用时这些接口整体不可用。
 
 ```
-POST/GET/PATCH /api/reservations       预定管理（staff）
-POST /api/reservations/:id/arrive      到店，触发开台流程
+POST  /api/reservations                预定登记（staff）
+GET   /api/reservations                预定列表
+PATCH /api/reservations/:id/cancel     取消预定
+PATCH /api/reservations/:id/no-show    标记未到（仅"待到店"状态可标记）——已实现但暂无前端入口，见 docs/OPTIONAL_MODULES.md
+POST  /api/reservations/:id/arrive     到店，触发开台流程
 ```
 
 ### 报表
 
 ```
-GET /api/reports/...   仅 manager
+GET /api/reports/overview?from=YYYY-MM-DD&to=YYYY-MM-DD   经营概览（仅 manager）
+```
+
+营业额/订单量按类型（堂食/自提/配送）细分，另外给堂食翻台率、每日明细，具体口径见
+`ReportsService.getOverview`：营业额按实际收款时间算（不是下单时间），订单量按下单时间算
+且排除已取消的订单，翻台率 = 这段时间内完成（清台）的桌台会话数 / (桌台总数 × 天数)。
+`from`/`to` 按服务器本地时区解析当天的起止边界，不是 UTC。
+
+### 打印队列
+
+> 只给 `apps/print-agent`（本地打印代理，见 ARCHITECTURE.md 2.7）用，不是店员/顾客接口。
+> 鉴权是固定共享密钥（`X-Print-Agent-Token` 头，对应 `PRINT_AGENT_TOKEN` 环境变量），
+> 不是 JWT——打印代理是无人值守的本地服务，不走 PIN 登录换令牌那一套。
+
+```
+GET   /api/print-jobs/pending   待打印任务列表（按创建时间正序）
+PATCH /api/print-jobs/:id       { status: printed | failed, errorMessage? }
 ```
 
 ## 6. 待细化事项
 
 - 具体的错误码/响应体格式规范
-- session token / staff JWT 的过期时间与刷新机制
-- `round_number` 的服务端生成规则（详见 DATA_MODEL.md 待确认事项）
+- session token / staff JWT 的过期时间与刷新机制（目前都是签发后 12 小时过期，没有刷新机制，过期后重新登录/重新扫码）

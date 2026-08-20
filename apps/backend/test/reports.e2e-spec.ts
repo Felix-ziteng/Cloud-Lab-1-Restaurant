@@ -105,6 +105,7 @@ describe('经营概览报表 (e2e)', () => {
     // 放在 it() 里会导致失败用例的测试数据残留，污染下一次跑测试（之前踩过这个坑）
     afterEach(async () => {
       if (!orderId || !tableId) return;
+      await prisma.printJob.deleteMany({ where: { orderId } });
       await prisma.orderItem.deleteMany({ where: { orderId } });
       await prisma.payment.deleteMany({ where: { orderId } });
       await prisma.order.deleteMany({ where: { id: orderId } });

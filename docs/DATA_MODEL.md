@@ -17,6 +17,7 @@ erDiagram
     Order ||--o{ Payment : "收款记录"
     Order ||--o{ PriceAdjustment : "敏感操作记录"
     Order |o--|| DeliveryInfo : "配送单(仅delivery)"
+    Order ||--o{ PrintJob : "打印任务(厨房单/收据)"
 
     OrderItem }o--|| Dish : "引用"
     OrderItem }o--o| PriceAdjustment : "单项调整"
@@ -25,9 +26,6 @@ erDiagram
 
     PriceAdjustment }o--|| StaffAccount : "approved_by(店长/管理员)"
     Payment }o--o| StaffAccount : "collected_by"
-    Payment }o--o| Rider : "collected_by(配送代收)"
-
-    DeliveryInfo }o--o| Rider : "assigned_to"
 
     Reservation }o--o| Table : "预分配桌台"
     Reservation }o--|| StaffAccount : "created_by"
@@ -120,22 +118,18 @@ erDiagram
 | role | `staff` 普通店员 / `manager` 店长-管理员 |
 | status | `active` / `inactive` |
 
-### Rider 配送员
-
-| 字段 | 说明 |
-|---|---|
-| id / name / login_credential / status | 同 StaffAccount 结构，独立账号体系 |
-
 ### DeliveryInfo 配送单（仅 `Order.type = delivery`）
+
+V1 没有独立的骑手/配送员账号体系——配送由普通店员完成，店员直接在系统里把状态标记为
+"配送中"/"已送达"，不需要"分配给具体某个人"这一步。
 
 | 字段 | 说明 |
 |---|---|
 | order_id | 与 Order 一一对应 |
 | address / contact_phone | |
-| rider_id | 可空，分配后填入 |
-| status | `unassigned` / `assigned` / `picked_up` / `delivering` / `delivered` |
+| status | `unassigned`（未出发） / `delivering`（配送中） / `delivered`（已送达） |
 | cod_amount | 应收金额（货到付款） |
-| payment_confirmed | 骑手是否已确认收款 |
+| payment_confirmed | 店员是否已在系统里确认收款 |
 | confirmed_at | |
 
 ### Payment 收款记录
@@ -143,12 +137,19 @@ erDiagram
 | 字段 | 说明 |
 |---|---|
 | id / order_id | |
-| method | `cash` 现金 / `staff_qr` 店员扫码枪收款 / `rider_cod` 骑手代收 等 |
+| method | `cash` 现金 / `staff_qr` 店员扫码枪收款 / `rider_cod` 货到付款代收（枚举名是历史遗留，实际由店员送达时代收，跟骑手账号无关） |
 | amount | |
-| collected_by_type / collected_by_id | `staff` 或 `rider` |
+| collected_by_type / collected_by_id | 只会写入 `staff` |
 | collected_at | |
 
 > V1 不支持一笔订单拆分多笔收款（拆账/AA），`Order` 与 `Payment` 按 1 : 1 使用，`Payment` 建模为一对多只是为预留扩展空间，不代表 V1 会用到多条记录。
+
+> **关于骑手账号体系**：早期版本设计过独立的 `Rider` 实体（结构同 `StaffAccount`，独立
+> 账号/登录），以及 `DeliveryInfo.rider_id`（分配对象）、`Payment.collected_by_rider_id`
+> （骑手代收）这些关联字段，用来支持"分配给具体骑手 → 骑手确认收款"的流程。这套账号体系
+> 已经整体下线，产品层面不再有配送员这个角色。数据库层为了保留可逆性，`Rider` 表和上述外键
+> 字段暂时还留在 schema 里、应用层完全不写入/不读取——这是一处刻意保留的技术债，不代表这些
+> 字段仍在业务上使用，之后如果确定不会重新做骑手账号体系，可以考虑连同 schema 一起清掉。
 
 ### PriceAdjustment 敏感操作记录
 
@@ -191,7 +192,20 @@ erDiagram
 | reservation_enabled | 是否启用预定模块 |
 | updated_at | |
 
-> 桌台平板 vs 顾客自行扫码不需要开关——两者是同一套代码的同一个入口，纯属客户硬件采购决策。打印机相关的配置（打印站点、路由规则）尚未设计，见 ARCHITECTURE.md 2.7"暂缓的部分"。
+> 桌台平板 vs 顾客自行扫码不需要开关——两者是同一套代码的同一个入口，纯属客户硬件采购决策。打印机相关的配置（要不要打印、按出品站点分单路由）暂时也没有对应字段，见 ARCHITECTURE.md 2.7 打印代理那一段的"已知限制"。
+
+### PrintJob 打印任务
+
+打印队列，见 [ARCHITECTURE.md](./ARCHITECTURE.md) 2.7"打印代理程序"。`payload` 是建单/收款那一刻的快照（菜名、数量、金额等），不是实时反查订单当前状态——即使订单之后被改价/作废，已经生成的这条打印任务内容也不受影响。
+
+| 字段 | 说明 |
+|---|---|
+| id / order_id | |
+| type | `kitchen` 厨房单（提交点餐时生成）/ `receipt` 收据（记录收款时生成） |
+| payload | JSON 快照，具体形状见 `packages/shared-types` 的 `KitchenTicketPayload`/`ReceiptPayload` |
+| status | `pending` 待打印 / `printed` 已打印 / `failed` 打印失败（`error_message` 记录原因） |
+| error_message | 可空，仅 `failed` 状态时有值 |
+| created_at / printed_at | |
 
 ## 3. 关键设计决策
 
@@ -240,5 +254,5 @@ erDiagram
 - ~~员工登录鉴权具体方式~~ 已定为 PIN 码，见 ARCHITECTURE.md
 - ~~`round_number` 的具体触发规则~~ 已在脚手架搭建时定案：`OrderItem` 加一个 `submittedAt`（可空）字段，加菜时 `roundNumber = 0` 且 `submittedAt = null`（代表"未提交的购物车"），调用 `/orders/:id/submit` 时统一把当前所有未提交项分配下一个 `roundNumber` 并写入 `submittedAt`，推送厨房。schema.prisma 已按此实现。
 - ~~`price_override` 的精确语义~~ 已定案，见上面 3.6
-- **新发现的缺口**：外卖/自提订单目前只支持店员在前台代客创建（POS 场景）。PRD 里"顾客线上下单外卖/自提"这条路径还没有对应的顾客身份/令牌模型——现有的 guest session token 是绑定 `table_session_id` 的堂食专属身份，不能直接套用到外卖/自提。这是下一阶段需要单独设计的点：顾客在店外下单，如何标识"这是同一个顾客"、如何查询订单状态。
-- 报表所需的统计口径（营业额、菜品销量排行等）尚未设计，待后续单独讨论
+- ~~外卖/自提顾客线上下单的身份/令牌模型~~ 已定案并实现：guest token 的 `tableSessionId` 允许为空（`OrdersService.createGuestOrder`），顾客自助下单不需要绑定桌台；换设备/清缓存后靠"订单号 + 手机号"找回（`GET /orders/lookup`），见 API_DESIGN.md 和 `docs/OPTIONAL_MODULES.md`（这个模块默认关闭，按客户定制开启）
+- ~~报表统计口径~~ 已定案并实现：营业额（按收款时间）、订单量、堂食翻台率，按日期范围查询，见 `ReportsService.getOverview`。菜品销量排行还没做，如果需要可以再单独排期

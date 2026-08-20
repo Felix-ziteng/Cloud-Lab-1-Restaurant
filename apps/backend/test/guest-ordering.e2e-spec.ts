@@ -91,6 +91,7 @@ describe('外卖/自提顾客自助下单 (e2e)', () => {
 
     afterEach(async () => {
       if (createdOrderIds.length === 0) return;
+      await prisma.printJob.deleteMany({ where: { orderId: { in: createdOrderIds } } });
       await prisma.orderItem.deleteMany({ where: { orderId: { in: createdOrderIds } } });
       await prisma.order.deleteMany({ where: { id: { in: createdOrderIds } } });
     });

@@ -14,6 +14,7 @@ import { ReservationsModule } from './reservations/reservations.module';
 import { StoreConfigModule } from './store-config/store-config.module';
 import { StaffModule } from './staff/staff.module';
 import { ReportsModule } from './reports/reports.module';
+import { PrintJobsModule } from './print-jobs/print-jobs.module';
 
 @Module({
   imports: [
@@ -30,6 +31,7 @@ import { ReportsModule } from './reports/reports.module';
     ReservationsModule,
     StaffModule,
     ReportsModule,
+    PrintJobsModule,
   ],
   controllers: [AppController],
   providers: [AppService],

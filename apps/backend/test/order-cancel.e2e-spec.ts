@@ -64,6 +64,7 @@ describe('订单取消 (e2e，暂无前端入口，仅接口层验证)', () => {
 
   afterEach(async () => {
     if (!orderId) return;
+    await prisma.printJob.deleteMany({ where: { orderId } });
     await prisma.orderItem.deleteMany({ where: { orderId } });
     await prisma.payment.deleteMany({ where: { orderId } });
     await prisma.order.deleteMany({ where: { id: orderId } });

@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState, type FormEvent } from 'react';
 import type { StoreConfig, TableWithSession } from '@restaurant/shared-types';
 import { api, setToken, getToken, clearToken, onAuthInvalidated } from '../api/client';
 import { RealtimeProvider, RealtimeListener } from '../realtime/RealtimeContext';
+import { applyTheme } from '../theme/applyTheme';
 import ManagementPanel from '../components/ManagementPanel';
 import OrderDetailPanel from '../components/OrderDetailPanel';
 import OrderHistoryPanel from '../components/OrderHistoryPanel';
@@ -90,6 +91,14 @@ export default function FrontDeskPage() {
     await runAction(async () => {
       const updated = await api.patch<StoreConfig>('/store-config', { [feature]: value }, 'staffToken');
       setConfig(updated);
+    });
+  }
+
+  async function changeTheme(theme: StoreConfig['uiTheme']) {
+    await runAction(async () => {
+      const updated = await api.patch<StoreConfig>('/store-config', { uiTheme: theme }, 'staffToken');
+      setConfig(updated);
+      applyTheme(updated.uiTheme);
     });
   }
 
@@ -198,6 +207,28 @@ export default function FrontDeskPage() {
             />
             启用厨房电子看板
           </label>
+
+          <div>
+            <p>界面主题（全店生效：顾客点餐页 / 厨房看板 / 前台）</p>
+            <label>
+              <input
+                type="radio"
+                name="uiTheme"
+                checked={config.uiTheme === 'modern'}
+                onChange={() => changeTheme('modern')}
+              />
+              现代简约
+            </label>
+            <label>
+              <input
+                type="radio"
+                name="uiTheme"
+                checked={config.uiTheme === 'warm'}
+                onChange={() => changeTheme('warm')}
+              />
+              暖色调
+            </label>
+          </div>
         </section>
       )}
     </div>

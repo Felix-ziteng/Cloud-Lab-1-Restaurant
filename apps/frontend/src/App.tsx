@@ -1,4 +1,8 @@
+import { useEffect } from 'react';
 import { Routes, Route } from 'react-router-dom';
+import type { StoreConfig } from '@restaurant/shared-types';
+import { api } from './api/client';
+import { applyTheme } from './theme/applyTheme';
 import GuestOrderPage from './pages/GuestOrderPage';
 import FrontDeskPage from './pages/FrontDeskPage';
 import KitchenPage from './pages/KitchenPage';
@@ -15,6 +19,16 @@ import OrderStatusPage from './pages/OrderStatusPage';
 //   /kitchen           -> 厨房 KDS 看板
 // 骑手自助端（/rider）暂时不需要：配送状态改为店员在前台直接记录，见 DeliveryPanel
 function App() {
+  // 主题是门店级配置，不是某个页面的私有状态——不管从哪个路由进来（顾客扫码点餐、
+  // 厨房看板、前台）都要读同一份 StoreConfig 应用到 <html data-theme>，所以放在
+  // 最顶层跑一次，而不是在各个页面里各自 fetch 各自 apply。/store-config 不需要鉴权。
+  useEffect(() => {
+    api
+      .get<StoreConfig>('/store-config')
+      .then((config) => applyTheme(config.uiTheme))
+      .catch(() => {});
+  }, []);
+
   return (
     <Routes>
       <Route path="/order/:tableId" element={<GuestOrderPage />} />

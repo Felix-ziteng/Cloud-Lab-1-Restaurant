@@ -1,111 +1,144 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+
+@custom-variant dark (&:is(.dark *));
+
+/* 现代简约方向（2026-08-20 跟用户确认的视觉方向，见 design 稿 Main.dc.html）：
+   中性灰白底 + 一个蓝色品牌色，圆角适中，信息密度优先——POS/KDS 这类高频操作场景
+   易读性优先于个性。数值直接照抄自当时给用户看的对比稿，不是随手定的。 */
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+
+  /* 订单/厨房状态徽标——shadcn 语义色里没有这个概念，这是本项目自己的领域色 */
+  --color-status-pending: var(--status-pending);
+  --color-status-pending-foreground: var(--status-pending-foreground);
+  --color-status-preparing: var(--status-preparing);
+  --color-status-preparing-foreground: var(--status-preparing-foreground);
+  --color-status-done: var(--status-done);
+  --color-status-done-foreground: var(--status-done-foreground);
+
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+}
+
 :root {
-  --text: #6b6375;
-  --text-h: #08060d;
-  --bg: #fff;
-  --border: #e5e4e7;
-  --code-bg: #f4f3ec;
-  --accent: #aa3bff;
-  --accent-bg: rgba(170, 59, 255, 0.1);
-  --accent-border: rgba(170, 59, 255, 0.5);
-  --social-bg: rgba(244, 243, 236, 0.5);
-  --shadow:
-    rgba(0, 0, 0, 0.1) 0 10px 15px -3px, rgba(0, 0, 0, 0.05) 0 4px 6px -2px;
+  --radius: 0.625rem;
 
-  --sans: system-ui, 'Segoe UI', Roboto, sans-serif;
-  --heading: system-ui, 'Segoe UI', Roboto, sans-serif;
-  --mono: ui-monospace, Consolas, monospace;
+  --background: oklch(0.985 0.002 240);
+  --foreground: oklch(0.22 0.01 250);
+  --card: oklch(1 0 0);
+  --card-foreground: oklch(0.22 0.01 250);
+  --popover: oklch(1 0 0);
+  --popover-foreground: oklch(0.22 0.01 250);
+  --primary: oklch(0.52 0.16 255);
+  --primary-foreground: oklch(0.99 0 0);
+  --secondary: oklch(0.95 0.004 250);
+  --secondary-foreground: oklch(0.22 0.01 250);
+  --muted: oklch(0.95 0.004 250);
+  --muted-foreground: oklch(0.5 0.012 250);
+  --accent: oklch(0.94 0.03 255);
+  --accent-foreground: oklch(0.3 0.1 255);
+  --destructive: oklch(0.58 0.22 25);
+  --destructive-foreground: oklch(0.99 0 0);
+  --border: oklch(0.91 0.004 240);
+  --input: oklch(0.91 0.004 240);
+  --ring: oklch(0.52 0.16 255 / 0.5);
 
-  font: 18px/145% var(--sans);
-  letter-spacing: 0.18px;
-  color-scheme: light dark;
-  color: var(--text);
-  background: var(--bg);
-  font-synthesis: none;
-  text-rendering: optimizeLegibility;
-  -webkit-font-smoothing: antialiased;
-  -moz-osx-font-smoothing: grayscale;
+  --status-pending: oklch(0.94 0.01 250);
+  --status-pending-foreground: oklch(0.45 0.02 250);
+  --status-preparing: oklch(0.93 0.09 75);
+  --status-preparing-foreground: oklch(0.45 0.11 70);
+  --status-done: oklch(0.92 0.08 150);
+  --status-done-foreground: oklch(0.42 0.1 150);
+}
 
-  @media (max-width: 1024px) {
-    font-size: 16px;
+/* 暖色调方向：同一套 token 名，换一套偏暖的数值——餐饮/外卖场景更有食欲感，
+   由店长在前台"门店设置"里选择（StoreConfig.uiTheme），作用于全站（顾客端/厨房/前台共用）。
+   只做浅色版本：深色模式目前没有入口，等以后需要再补 [data-theme='warm'].dark。 */
+:root[data-theme='warm'] {
+  --background: oklch(0.97 0.012 60);
+  --foreground: oklch(0.26 0.02 40);
+  --card: oklch(0.99 0.008 60);
+  --card-foreground: oklch(0.26 0.02 40);
+  --popover: oklch(0.99 0.008 60);
+  --popover-foreground: oklch(0.26 0.02 40);
+  --primary: oklch(0.65 0.19 35);
+  --primary-foreground: oklch(0.99 0 0);
+  --secondary: oklch(0.93 0.03 45);
+  --secondary-foreground: oklch(0.32 0.03 40);
+  --muted: oklch(0.93 0.02 50);
+  --muted-foreground: oklch(0.5 0.02 45);
+  --accent: oklch(0.9 0.06 40);
+  --accent-foreground: oklch(0.32 0.08 35);
+  --destructive: oklch(0.58 0.22 25);
+  --destructive-foreground: oklch(0.99 0 0);
+  --border: oklch(0.88 0.025 50);
+  --input: oklch(0.88 0.025 50);
+  --ring: oklch(0.65 0.19 35 / 0.5);
+
+  --status-pending: oklch(0.93 0.02 50);
+  --status-pending-foreground: oklch(0.45 0.03 45);
+  --status-preparing: oklch(0.88 0.09 70);
+  --status-preparing-foreground: oklch(0.42 0.12 60);
+  --status-done: oklch(0.89 0.08 145);
+  --status-done-foreground: oklch(0.4 0.1 145);
+}
+
+.dark {
+  --background: oklch(0.16 0.01 250);
+  --foreground: oklch(0.96 0.004 250);
+  --card: oklch(0.2 0.01 250);
+  --card-foreground: oklch(0.96 0.004 250);
+  --popover: oklch(0.2 0.01 250);
+  --popover-foreground: oklch(0.96 0.004 250);
+  --primary: oklch(0.65 0.16 255);
+  --primary-foreground: oklch(0.16 0.01 250);
+  --secondary: oklch(0.27 0.012 250);
+  --secondary-foreground: oklch(0.96 0.004 250);
+  --muted: oklch(0.27 0.012 250);
+  --muted-foreground: oklch(0.68 0.012 250);
+  --accent: oklch(0.3 0.05 255);
+  --accent-foreground: oklch(0.9 0.05 255);
+  --destructive: oklch(0.6 0.2 25);
+  --destructive-foreground: oklch(0.96 0 0);
+  --border: oklch(0.3 0.012 250);
+  --input: oklch(0.3 0.012 250);
+  --ring: oklch(0.65 0.16 255 / 0.5);
+
+  --status-pending: oklch(0.3 0.012 250);
+  --status-pending-foreground: oklch(0.75 0.015 250);
+  --status-preparing: oklch(0.32 0.08 70);
+  --status-preparing-foreground: oklch(0.82 0.1 75);
+  --status-done: oklch(0.3 0.06 150);
+  --status-done-foreground: oklch(0.78 0.1 150);
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
   }
-}
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    --text: #9ca3af;
-    --text-h: #f3f4f6;
-    --bg: #16171d;
-    --border: #2e303a;
-    --code-bg: #1f2028;
-    --accent: #c084fc;
-    --accent-bg: rgba(192, 132, 252, 0.15);
-    --accent-border: rgba(192, 132, 252, 0.5);
-    --social-bg: rgba(47, 48, 58, 0.5);
-    --shadow:
-      rgba(0, 0, 0, 0.4) 0 10px 15px -3px, rgba(0, 0, 0, 0.25) 0 4px 6px -2px;
+  body {
+    @apply bg-background text-foreground;
+    font-family: system-ui, -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
   }
-
-  #social .button-icon {
-    filter: invert(1) brightness(2);
-  }
-}
-
-#root {
-  width: 1126px;
-  max-width: 100%;
-  margin: 0 auto;
-  text-align: center;
-  border-inline: 1px solid var(--border);
-  min-height: 100svh;
-  display: flex;
-  flex-direction: column;
-  box-sizing: border-box;
-}
-
-body {
-  margin: 0;
-}
-
-h1,
-h2 {
-  font-family: var(--heading);
-  font-weight: 500;
-  color: var(--text-h);
-}
-
-h1 {
-  font-size: 56px;
-  letter-spacing: -1.68px;
-  margin: 32px 0;
-  @media (max-width: 1024px) {
-    font-size: 36px;
-    margin: 20px 0;
-  }
-}
-h2 {
-  font-size: 24px;
-  line-height: 118%;
-  letter-spacing: -0.24px;
-  margin: 0 0 8px;
-  @media (max-width: 1024px) {
-    font-size: 20px;
-  }
-}
-p {
-  margin: 0;
-}
-
-code,
-.counter {
-  font-family: var(--mono);
-  display: inline-flex;
-  border-radius: 4px;
-  color: var(--text-h);
-}
-
-code {
-  font-size: 15px;
-  line-height: 135%;
-  padding: 4px 8px;
-  background: var(--code-bg);
 }

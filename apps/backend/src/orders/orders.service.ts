@@ -5,6 +5,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { RealtimeGateway } from '../realtime/realtime.gateway';
 import { TablesService } from '../tables/tables.service';
 import { StoreConfigService } from '../store-config/store-config.service';
+import { PrintJobsService } from '../print-jobs/print-jobs.service';
 import { parseDayBoundary } from '../common/date-range.util';
 import { CreateOrderDto } from './dto/create-order.dto';
 import { AddOrderItemsDto } from './dto/add-order-items.dto';
@@ -21,6 +22,7 @@ export class OrdersService {
     private readonly tablesService: TablesService,
     private readonly storeConfigService: StoreConfigService,
     private readonly jwtService: JwtService,
+    private readonly printJobsService: PrintJobsService,
   ) {}
 
   // 外卖/自提订单有两条创建路径：店员在前台代客下单（POS 场景），
@@ -79,6 +81,21 @@ export class OrdersService {
 
     this.realtime.emitToKitchen('new_order_item', { orderId: order.id, roundNumber: 1 });
     this.realtime.emitToFrontdesk('order_created', { orderId: order.id, type: order.type });
+
+    await this.printJobsService.createKitchenJob(order.id, {
+      orderId: order.id,
+      orderNumber: order.orderNumber,
+      orderType: order.type,
+      tableLabel: null, // 这个入口只建外卖/自提订单，没有桌台
+      roundNumber: 1,
+      items: dto.items.map((i) => ({
+        dishName: dishes.find((d) => d.id === i.dishId)?.name ?? '未知菜品',
+        quantity: i.quantity,
+        notes: i.notes ?? null,
+      })),
+      createdAt: order.createdAt.toISOString(),
+    });
+
     return order;
   }
 
@@ -213,12 +230,27 @@ export class OrdersService {
 
     this.realtime.emitToKitchen('new_order_item', { orderId, roundNumber: nextRound });
 
-    const order = await this.prisma.order.findUniqueOrThrow({ where: { id: orderId } });
+    const order = await this.prisma.order.findUniqueOrThrow({
+      where: { id: orderId },
+      include: { tableSession: { include: { tables: { include: { table: true } } } } },
+    });
     if (order.tableSessionId) {
       this.realtime.emitToTable(order.tableSessionId, 'item_added', { orderId, roundNumber: nextRound });
     }
     this.realtime.emitToOrder(orderId, 'order_updated', { orderId });
     this.realtime.emitToFrontdesk('order_updated', { orderId });
+
+    const submittedItems = await this.prisma.orderItem.findMany({ where: { id: { in: pendingItems.map((i) => i.id) } } });
+    const tableLabel = order.tableSession?.tables.map((t) => t.table.tableNumber).join('+') ?? null;
+    await this.printJobsService.createKitchenJob(orderId, {
+      orderId,
+      orderNumber: order.orderNumber,
+      orderType: order.type,
+      tableLabel,
+      roundNumber: nextRound,
+      items: submittedItems.map((i) => ({ dishName: i.dishNameSnapshot, quantity: i.quantity, notes: i.notes })),
+      createdAt: new Date().toISOString(),
+    });
 
     return { roundNumber: nextRound, itemCount: pendingItems.length };
   }
@@ -288,6 +320,33 @@ export class OrdersService {
     }
 
     this.realtime.emitToFrontdesk('order_updated', { orderId });
+
+    const [items, tableSession] = await Promise.all([
+      this.prisma.orderItem.findMany({ where: { orderId, isVoided: false } }),
+      order.tableSessionId
+        ? this.prisma.tableSession.findUnique({
+            where: { id: order.tableSessionId },
+            include: { tables: { include: { table: true } } },
+          })
+        : null,
+    ]);
+    await this.printJobsService.createReceiptJob(orderId, {
+      orderId,
+      orderNumber: updatedOrder.orderNumber,
+      orderType: updatedOrder.type,
+      tableLabel: tableSession?.tables.map((t) => t.table.tableNumber).join('+') ?? null,
+      items: items.map((i) => ({
+        dishName: i.dishNameSnapshot,
+        quantity: i.quantity,
+        unitPrice: i.unitPriceSnapshot.toString(),
+      })),
+      subtotal: updatedOrder.subtotal.toString(),
+      discountTotal: updatedOrder.discountTotal.toString(),
+      total: updatedOrder.total.toString(),
+      paymentMethod: dto.method,
+      paidAt: new Date().toISOString(),
+    });
+
     return updatedOrder;
   }
 

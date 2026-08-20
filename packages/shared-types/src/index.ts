@@ -2,10 +2,13 @@
 // 后端（Prisma 生成的类型）与前端共用这些类型，避免接口契约漂移。
 
 // 门店能力配置：决定这份部署要不要暴露厨房看板 / 外卖 / 预定这些可选模块
+export type UiTheme = "modern" | "warm";
+
 export interface StoreConfig {
   kdsScreenEnabled: boolean;
   deliveryEnabled: boolean;
   reservationEnabled: boolean;
+  uiTheme: UiTheme;
 }
 
 export type TableStatus = "idle" | "occupied" | "pending_clear";
@@ -220,4 +223,45 @@ export interface ReportOverview {
   // 堂食翻台率：这段时间内完成的桌台会话数 / (桌台数 * 天数)
   tableTurnoverRate: number;
   dailyBreakdown: { date: string; revenue: number; orderCount: number }[];
+}
+
+// --- 打印队列：ARCHITECTURE.md 2.7"打印代理"，backend 生产、apps/print-agent 消费 ---
+
+export type PrintJobType = "kitchen" | "receipt";
+export type PrintJobStatus = "pending" | "printed" | "failed";
+
+// 建单/收款那一刻的快照，不是实时反查订单当前状态，见 PrintJobsService 的注释
+export interface KitchenTicketPayload {
+  orderId: string;
+  orderNumber: number;
+  orderType: OrderType;
+  tableLabel: string | null;
+  roundNumber: number;
+  items: { dishName: string; quantity: number; notes: string | null }[];
+  createdAt: string;
+}
+
+export interface ReceiptPayload {
+  orderId: string;
+  orderNumber: number;
+  orderType: OrderType;
+  tableLabel: string | null;
+  items: { dishName: string; quantity: number; unitPrice: string }[];
+  subtotal: string;
+  discountTotal: string;
+  total: string;
+  paymentMethod: string;
+  paidAt: string;
+}
+
+// GET /api/print-jobs/pending（打印代理专用，PrintAgentGuard 鉴权）
+export interface PrintJob {
+  id: string;
+  type: PrintJobType;
+  orderId: string;
+  payload: KitchenTicketPayload | ReceiptPayload;
+  status: PrintJobStatus;
+  errorMessage: string | null;
+  createdAt: string;
+  printedAt: string | null;
 }

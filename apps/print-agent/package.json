@@ -1,0 +1,23 @@
+{
+  "name": "@restaurant/print-agent",
+  "version": "0.1.0",
+  "private": true,
+  "description": "本地打印代理：订阅厨房 WebSocket 事件，把小票/收据打印任务转成 ESC/POS 指令发给热敏打印机",
+  "main": "dist/index.js",
+  "scripts": {
+    "build": "tsc",
+    "start": "node dist/index.js",
+    "dev": "tsx watch src/index.ts"
+  },
+  "dependencies": {
+    "@restaurant/shared-types": "*",
+    "dotenv": "^16.4.7",
+    "node-thermal-printer": "^4.6.1",
+    "socket.io-client": "^4.8.1"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.3"
+  }
+}

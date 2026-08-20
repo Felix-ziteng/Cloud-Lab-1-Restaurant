@@ -2,6 +2,7 @@ import { Injectable } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 
 export type FeatureFlag = 'kdsScreenEnabled' | 'deliveryEnabled' | 'reservationEnabled';
+export type UiTheme = 'modern' | 'warm';
 
 @Injectable()
 export class StoreConfigService {
@@ -16,7 +17,7 @@ export class StoreConfigService {
     });
   }
 
-  update(patch: Partial<Record<FeatureFlag, boolean>>) {
+  update(patch: Partial<Record<FeatureFlag, boolean>> & { uiTheme?: UiTheme }) {
     return this.prisma.storeConfig.upsert({
       where: { id: 1 },
       update: patch,

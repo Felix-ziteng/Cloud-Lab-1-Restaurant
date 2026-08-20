@@ -2,6 +2,12 @@ import { useEffect, useState, type FormEvent } from 'react';
 import { useNavigate } from 'react-router-dom';
 import type { GuestOrderCreated, MenuCategory, StoreConfig } from '@restaurant/shared-types';
 import { api, setToken } from '../api/client';
+import { Button } from '@/components/ui/button';
+import { Card, CardContent } from '@/components/ui/card';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
+import { Separator } from '@/components/ui/separator';
 
 // 外卖/自提顾客自助下单：不需要登录，浏览菜单 -> 加购物车 -> 填联系方式一次性提交。
 // 跟堂食的"加购物车 -> 提交给厨房"两步式不一样：这里没有"回头继续点"的场景，
@@ -81,101 +87,134 @@ export default function TakeoutOrderPage() {
   // 先不下结论，避免刷新瞬间闪一下"未开放"再变回正常页面
   if (config && !config.deliveryEnabled) {
     return (
-      <div>
-        <h1>外卖 / 自提点餐</h1>
-        <p>该门店暂未开放外卖/自提自助下单，请到店点餐或联系店员代下单。</p>
+      <div className="flex min-h-screen items-center justify-center bg-background p-6">
+        <div className="mx-auto max-w-md text-center">
+          <h1 className="text-lg font-semibold text-foreground">外卖 / 自提点餐</h1>
+          <p className="mt-2 text-sm text-muted-foreground">
+            该门店暂未开放外卖/自提自助下单，请到店点餐或联系店员代下单。
+          </p>
+        </div>
       </div>
     );
   }
 
   return (
-    <div>
-      <h1>外卖 / 自提点餐</h1>
-      {error && <p style={{ color: 'red' }}>{error}</p>}
-
-      <section>
-        <h2>菜单</h2>
-        {menu.map((category) => (
-          <div key={category.id}>
-            <h3>{category.name}</h3>
-            {category.dishes
-              ?.filter((d) => d.isAvailable)
-              .map((dish) => (
-                <div key={dish.id}>
-                  <span>
-                    {dish.name} ¥{Number(dish.price).toFixed(2)}
-                  </span>
-                  <button type="button" onClick={() => addToCart(dish.id, -1)} disabled={!cart[dish.id]}>
-                    −
-                  </button>
-                  <span>{cart[dish.id] ?? 0}</span>
-                  <button type="button" onClick={() => addToCart(dish.id, 1)}>
-                    +
-                  </button>
-                </div>
-              ))}
+    <div className="min-h-screen bg-background">
+      <div className="mx-auto flex max-w-md flex-col gap-6 p-4">
+        <h1 className="text-lg font-semibold text-foreground">外卖 / 自提点餐</h1>
+        {error && (
+          <div className="rounded-lg border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">
+            {error}
           </div>
-        ))}
-      </section>
+        )}
 
-      <form onSubmit={submitOrder}>
-        <h2>取餐方式</h2>
-        <label>
-          <input
-            type="radio"
-            checked={form.type === 'takeout'}
-            onChange={() => setForm({ ...form, type: 'takeout' })}
-          />
-          到店自提
-        </label>
-        <label>
-          <input
-            type="radio"
-            checked={form.type === 'delivery'}
-            onChange={() => setForm({ ...form, type: 'delivery' })}
-          />
-          配送到家
-        </label>
+        <section className="flex flex-col gap-4">
+          {menu.map((category) => (
+            <div key={category.id} className="flex flex-col gap-2">
+              <h2 className="text-sm font-medium text-muted-foreground">{category.name}</h2>
+              <div className="flex flex-col gap-2">
+                {category.dishes
+                  ?.filter((d) => d.isAvailable)
+                  .map((dish) => (
+                    <Card key={dish.id}>
+                      <CardContent className="flex items-center justify-between gap-3 py-1">
+                        <div>
+                          <p className="text-sm font-medium text-foreground">
+                            {dish.name} · ¥{Number(dish.price).toFixed(2)}
+                          </p>
+                          {dish.description && (
+                            <p className="text-sm text-muted-foreground">{dish.description}</p>
+                          )}
+                        </div>
+                        <div className="flex shrink-0 items-center gap-2">
+                          <Button
+                            type="button"
+                            variant="outline"
+                            size="icon"
+                            className="size-7"
+                            onClick={() => addToCart(dish.id, -1)}
+                            disabled={!cart[dish.id]}
+                          >
+                            −
+                          </Button>
+                          <span className="w-4 text-center text-sm font-medium">{cart[dish.id] ?? 0}</span>
+                          <Button type="button" size="icon" className="size-7" onClick={() => addToCart(dish.id, 1)}>
+                            +
+                          </Button>
+                        </div>
+                      </CardContent>
+                    </Card>
+                  ))}
+              </div>
+            </div>
+          ))}
+        </section>
 
-        <div>
-          <input
+        <Separator />
+
+        <form onSubmit={submitOrder} className="flex flex-col gap-4">
+          <div className="flex flex-col gap-2">
+            <h2 className="text-sm font-medium text-muted-foreground">取餐方式</h2>
+            <RadioGroup
+              value={form.type}
+              onValueChange={(value) => setForm({ ...form, type: value as 'takeout' | 'delivery' })}
+              className="flex flex-row gap-6"
+            >
+              <div className="flex items-center gap-2">
+                <RadioGroupItem value="takeout" id="type-takeout" />
+                <Label htmlFor="type-takeout">到店自提</Label>
+              </div>
+              <div className="flex items-center gap-2">
+                <RadioGroupItem value="delivery" id="type-delivery" />
+                <Label htmlFor="type-delivery">配送到家</Label>
+              </div>
+            </RadioGroup>
+          </div>
+
+          <Input
             placeholder="联系电话"
             value={form.customerContact}
             onChange={(e) => setForm({ ...form, customerContact: e.target.value })}
           />
-        </div>
 
-        {form.type === 'delivery' && (
-          <div>
-            <input
+          {form.type === 'delivery' && (
+            <Input
               placeholder="配送地址"
               value={form.deliveryAddress}
               onChange={(e) => setForm({ ...form, deliveryAddress: e.target.value })}
             />
+          )}
+
+          {form.type === 'takeout' && (
+            <div className="flex flex-col gap-1">
+              <Label htmlFor="pickup-time" className="text-muted-foreground">
+                期望取餐时间（可选）
+              </Label>
+              <Input
+                id="pickup-time"
+                type="datetime-local"
+                value={form.pickupTime}
+                onChange={(e) => setForm({ ...form, pickupTime: e.target.value })}
+              />
+            </div>
+          )}
+
+          <div className="flex items-center justify-between text-sm font-medium text-foreground">
+            <span>合计（到店/送达时付款）</span>
+            <span>¥{cartTotal.toFixed(2)}</span>
           </div>
-        )}
 
-        {form.type === 'takeout' && (
-          <div>
-            <input
-              type="datetime-local"
-              value={form.pickupTime}
-              onChange={(e) => setForm({ ...form, pickupTime: e.target.value })}
-            />
-            <span>期望取餐时间（可选）</span>
-          </div>
-        )}
+          <Button type="submit" disabled={submitting}>
+            提交订单
+          </Button>
+        </form>
 
-        <p>合计：¥{cartTotal.toFixed(2)}（到店/送达时付款）</p>
-
-        <button type="submit" disabled={submitting}>
-          提交订单
-        </button>
-      </form>
-
-      <p>
-        <a href="/track-order">查询已下的订单</a>
-      </p>
+        <p className="text-center text-sm text-muted-foreground">
+          <a href="/track-order" className="underline underline-offset-2 hover:text-foreground">
+            查询已下的订单
+          </a>
+        </p>
+      </div>
     </div>
   );
 }

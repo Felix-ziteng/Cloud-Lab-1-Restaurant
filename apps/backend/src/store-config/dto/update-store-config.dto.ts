@@ -1,4 +1,4 @@
-import { IsBoolean, IsOptional } from 'class-validator';
+import { IsBoolean, IsIn, IsOptional } from 'class-validator';
 
 export class UpdateStoreConfigDto {
   @IsOptional()
@@ -12,4 +12,8 @@ export class UpdateStoreConfigDto {
   @IsOptional()
   @IsBoolean()
   reservationEnabled?: boolean;
+
+  @IsOptional()
+  @IsIn(['modern', 'warm'])
+  uiTheme?: 'modern' | 'warm';
 }

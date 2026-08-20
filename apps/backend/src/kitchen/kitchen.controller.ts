@@ -9,13 +9,13 @@ import { UpdateKitchenStatusDto } from './dto/update-kitchen-status.dto';
 export class KitchenController {
   constructor(private readonly kitchenService: KitchenService) {}
 
-  // MVP 简化：厨房站点级令牌（kitchen_station）尚未设计签发流程（见 auth.types.ts），
-  // 现阶段 KDS 页面借用店员 PIN 登录来访问，等站点级预配置流程做出来了再切换
+  // KDS 复用店员 PIN 登录（决策记录 2026-08-20：评估过无个人登录的站点级令牌，
+  // 收益撑不起单独的签发/设备预配置流程，维持现状即可，见 auth.types.ts）
   @UseGuards(JwtAuthGuard)
   @Get('queue')
   getQueue(@CurrentAuth() auth: AuthPayload) {
-    if (auth.type !== 'kitchen_station' && auth.type !== 'staff') {
-      throw new ForbiddenException('仅厨房站点或店员可查看出品队列');
+    if (auth.type !== 'staff') {
+      throw new ForbiddenException('仅店员可查看出品队列');
     }
     return this.kitchenService.getQueue();
   }
@@ -23,8 +23,8 @@ export class KitchenController {
   @UseGuards(JwtAuthGuard)
   @Patch(':id/kitchen-status')
   updateStatus(@Param('id') id: string, @Body() dto: UpdateKitchenStatusDto, @CurrentAuth() auth: AuthPayload) {
-    if (auth.type !== 'kitchen_station' && auth.type !== 'staff') {
-      throw new ForbiddenException('仅厨房站点或店员可更新出品状态');
+    if (auth.type !== 'staff') {
+      throw new ForbiddenException('仅店员可更新出品状态');
     }
     return this.kitchenService.updateStatus(id, dto.status);
   }
