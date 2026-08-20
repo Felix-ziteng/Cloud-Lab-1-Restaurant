@@ -7,10 +7,9 @@ import { App } from 'supertest/types';
 import { AppModule } from '../src/app.module';
 import { PrismaService } from '../src/prisma/prisma.service';
 
-// 回归测试：POST /orders/:id/cancel 目前"代码里先修改，但暂不启用"（没有前端入口，
-// 见 2026-08-20 决策记录），但既然实现了就要保证行为对：只有 manager 能调用、
-// 已支付的订单不能取消、堂食订单取消后桌台要正确释放。
-describe('订单取消 (e2e，暂无前端入口，仅接口层验证)', () => {
+// 回归测试：POST /orders/:id/cancel（前台"取消开台"按钮用的就是这个接口，2026-08-21 接上）
+// 只有 manager 能调用、已支付的订单不能取消、堂食订单取消后桌台要正确释放。
+describe('订单取消 (e2e)', () => {
   let app: INestApplication<App>;
   let prisma: PrismaService;
   let jwtService: JwtService;

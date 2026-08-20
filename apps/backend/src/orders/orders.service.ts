@@ -255,17 +255,22 @@ export class OrdersService {
     return { roundNumber: nextRound, itemCount: pendingItems.length };
   }
 
+  // 2026-08-21 临时简化：还没接 POS 收款，"发起结账"直接把桌台标成待清台，不等真正收款
+  // 那一步（recordPayment）才转——现在 recordPayment 那条收款入口在前台界面上先隐藏了。
+  // 等接了 POS，这里要改回"收款完成才待清台"，别把这行简化当成永久设计。
   async requestCheckout(orderId: string) {
     const order = await this.prisma.order.update({
       where: { id: orderId },
       data: { status: 'awaiting_payment' },
     });
+    if (order.tableSessionId) {
+      await this.tablesService.closeSession(order.tableSessionId);
+    }
     this.realtime.emitToFrontdesk('checkout_requested', { orderId, tableSessionId: order.tableSessionId });
     return order;
   }
 
-  // 暂不启用：后端能力已实现完整（含权限/状态校验），但前端还没接任何入口去调用它——
-  // 见跟用户的决策记录（2026-08-20），先把代码写完，等确定要不要做成一个正式功能再接 UI。
+  // 2026-08-21：前台"取消开台"按钮接了这个接口（决策记录见同日对话）。
   // 已支付的订单不能取消（这个系统没有线上支付，走到"已支付"意味着现金已经收了，
   // 取消不等于退款，账目会对不上，需要走店内其它流程处理，不是这个接口的职责）
   async cancelOrder(orderId: string) {

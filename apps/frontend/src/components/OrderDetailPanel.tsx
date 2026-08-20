@@ -40,6 +40,7 @@ export default function OrderDetailPanel({ table, allTables, isManager, onChange
   const [order, setOrder] = useState<OrderDetail | null>(null);
   const [menu, setMenu] = useState<MenuCategory[]>([]);
   const [error, setError] = useState<string | null>(null);
+  const [showPriceAdjust, setShowPriceAdjust] = useState(false);
 
   const orderId = table.activeSession?.order.id;
 
@@ -101,12 +102,14 @@ export default function OrderDetailPanel({ table, allTables, isManager, onChange
     });
   }
 
-  async function recordPayment() {
-    if (!order) return;
-    const amount = Number(window.prompt('实收金额？', order.total));
-    if (!amount || amount < 0) return;
+  // 记录收款这个入口暂时从界面上去掉了：现在没有对接 POS，"发起结账"直接让桌台进入
+  // 待清台状态（见后端 OrdersService.requestCheckout 的改动），不需要在这里收款确认这一步。
+  // 后端 POST /orders/:id/payments 接口本身没删，等接了 POS 再把入口加回来。
+
+  async function cancelTableOpen() {
+    if (!window.confirm('确定要取消这次开台吗？这桌当前的账单和已提交给厨房的菜品都会被取消，且不能撤销。')) return;
     await run(async () => {
-      await api.post(`/orders/${orderId}/payments`, { method: 'cash', amount }, 'staffToken');
+      await api.post(`/orders/${orderId}/cancel`, {}, 'staffToken');
       onClose();
     });
   }
@@ -330,23 +333,39 @@ export default function OrderDetailPanel({ table, allTables, isManager, onChange
         </p>
 
         {isManager && (
-          <div className="flex flex-wrap gap-2">
-            <Button variant="outline" size="sm" onClick={applyDiscount}>
-              整单打折
+          <div className="flex flex-col gap-2">
+            <Button
+              variant="outline"
+              size="sm"
+              className="self-start"
+              onClick={() => setShowPriceAdjust((v) => !v)}
+            >
+              调整价格
             </Button>
-            <Button variant="outline" size="sm" onClick={overrideOrderTotal}>
-              整单直接改价
-            </Button>
+            {showPriceAdjust && (
+              <div className="flex flex-wrap gap-2">
+                <Button variant="outline" size="sm" onClick={applyDiscount}>
+                  整单打折
+                </Button>
+                <Button variant="outline" size="sm" onClick={overrideOrderTotal}>
+                  整单直接改价
+                </Button>
+              </div>
+            )}
           </div>
         )}
 
-        <div className="flex gap-2">
+        <div className="flex flex-wrap gap-2">
           {order.status === 'open' && (
             <Button variant="outline" onClick={requestCheckout}>
               发起结账
             </Button>
           )}
-          {order.status !== 'paid' && <Button onClick={recordPayment}>记录收款</Button>}
+          {isManager && order.status !== 'paid' && order.status !== 'cancelled' && (
+            <Button variant="destructive" onClick={cancelTableOpen}>
+              取消开台
+            </Button>
+          )}
         </div>
       </CardContent>
     </Card>

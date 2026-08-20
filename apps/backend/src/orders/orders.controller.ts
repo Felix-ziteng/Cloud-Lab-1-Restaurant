@@ -131,8 +131,7 @@ export class OrdersController {
     return this.ordersService.recordPayment(id, dto, auth.sub);
   }
 
-  // 暂不启用：manager 权限门槛跟改价/打折/作废这些订单级敏感操作一致，
-  // 前端目前没有任何按钮调用这个接口（见 OrdersService.cancelOrder 的说明）
+  // "取消开台"用的就是这个接口——manager 权限门槛跟改价/打折/作废这些订单级敏感操作一致
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles('manager')
   @Post(':id/cancel')
