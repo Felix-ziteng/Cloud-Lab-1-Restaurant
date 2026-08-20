@@ -2,11 +2,28 @@ import { useCallback, useEffect, useState } from 'react';
 import type { MenuCategory, OrderDetail, TableWithSession } from '@restaurant/shared-types';
 import { api } from '../api/client';
 import { useRealtimeEvent } from '../realtime/RealtimeContext';
+import { Button } from '@/components/ui/button';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Badge } from '@/components/ui/badge';
+import { Separator } from '@/components/ui/separator';
 
 const KITCHEN_STATUS_LABEL: Record<string, string> = {
   pending: '待处理',
   preparing: '制作中',
   done: '已完成',
+};
+
+const KITCHEN_STATUS_BADGE_CLASS: Record<string, string> = {
+  pending: 'bg-status-pending text-status-pending-foreground',
+  preparing: 'bg-status-preparing text-status-preparing-foreground',
+  done: 'bg-status-done text-status-done-foreground',
+};
+
+const ORDER_STATUS_LABEL: Record<string, string> = {
+  open: '进行中',
+  awaiting_payment: '待结账',
+  paid: '已支付',
+  cancelled: '已取消',
 };
 
 interface Props {
@@ -18,7 +35,7 @@ interface Props {
 }
 
 // 选中一桌之后的账单/操作面板：加菜、改购物车、提交、改价（manager）、收款、拆台/换桌/改人数。
-// 从 FrontDeskPage 拆出来单独一个组件，不然那个文件要爆炸了。
+// 独立成组件而不是内联在 pages/FrontDeskTablesPage.tsx 里，不然那个文件要爆炸了。
 export default function OrderDetailPanel({ table, allTables, isManager, onChanged, onClose }: Props) {
   const [order, setOrder] = useState<OrderDetail | null>(null);
   const [menu, setMenu] = useState<MenuCategory[]>([]);
@@ -166,92 +183,172 @@ export default function OrderDetailPanel({ table, allTables, isManager, onChange
     });
   }
 
-  if (!order) return <section>加载中…</section>;
+  if (!order) {
+    return (
+      <Card>
+        <CardContent className="py-6 text-sm text-muted-foreground">加载中…</CardContent>
+      </Card>
+    );
+  }
 
   const sessionTables = allTables.filter((t) => t.activeSession?.id === table.activeSession?.id);
   const hasUnsubmitted = order.items.some((i) => i.roundNumber === 0);
 
   return (
-    <section>
-      <h2>{table.tableNumber} 账单</h2>
-      {error && <p style={{ color: 'red' }}>操作失败：{error}</p>}
-
-      <p>
-        {table.activeSession?.partySize} 位客人
-        <button onClick={updatePartySize}>改人数</button>
-        {sessionTables.length > 1 && <span>（并台：{sessionTables.map((t) => t.tableNumber).join('+')}）</span>}
-      </p>
-
-      {sessionTables.length > 1 &&
-        sessionTables.map((t) => (
-          <button key={t.id} onClick={() => unmergeTable(t.id)}>
-            把 {t.tableNumber} 拆出去
-          </button>
-        ))}
-      <button onClick={transferTable}>换桌</button>
-
-      <ul>
-        {order.items.map((item) => (
-          <li key={item.id}>
-            {item.dishNameSnapshot} x{item.quantity} — ¥{(Number(item.unitPriceSnapshot) * item.quantity).toFixed(2)} —{' '}
-            {item.roundNumber === 0 ? (
-              <>
-                未提交
-                <button onClick={() => changeQty(item.id, item.quantity - 1)}>−</button>
-                <button onClick={() => changeQty(item.id, item.quantity + 1)}>+</button>
-                <button onClick={() => removeItem(item.id)}>删除</button>
-              </>
-            ) : (
-              KITCHEN_STATUS_LABEL[item.kitchenStatus]
-            )}
-            {isManager && item.roundNumber > 0 && (
-              <>
-                <button onClick={() => voidItem(item.id)}>作废</button>
-                <button onClick={() => overrideItemPrice(item.id, String(Number(item.unitPriceSnapshot) * item.quantity))}>
-                  改这项价格
-                </button>
-              </>
-            )}
-          </li>
-        ))}
-      </ul>
-
-      {hasUnsubmitted && <button onClick={submitCart}>提交给厨房</button>}
-
-      <div>
-        <h3>加菜（代客点餐）</h3>
-        {menu.map((category) => (
-          <div key={category.id}>
-            <strong>{category.name}</strong>
-            <ul>
-              {category.dishes
-                .filter((d) => d.isAvailable)
-                .map((dish) => (
-                  <li key={dish.id}>
-                    {dish.name} ¥{Number(dish.price).toFixed(2)}
-                    <button onClick={() => addItem(dish.id)}>加入</button>
-                  </li>
-                ))}
-            </ul>
-          </div>
-        ))}
-      </div>
-
-      <p>
-        小计 ¥{Number(order.subtotal).toFixed(2)} － 折扣 ¥{Number(order.discountTotal).toFixed(2)} ＝ 合计 ¥
-        {Number(order.total).toFixed(2)}
-      </p>
-      <p>状态：{order.status}</p>
-
-      {isManager && (
+    <Card>
+      <CardHeader className="flex-row items-start justify-between gap-4">
         <div>
-          <button onClick={applyDiscount}>整单打折</button>
-          <button onClick={overrideOrderTotal}>整单直接改价</button>
+          <CardTitle>{table.tableNumber} 账单</CardTitle>
+          <p className="mt-1 text-sm text-muted-foreground">
+            {table.activeSession?.partySize} 位客人
+            {sessionTables.length > 1 && ` · 并台：${sessionTables.map((t) => t.tableNumber).join('+')}`}
+            {' · '}
+            {ORDER_STATUS_LABEL[order.status]}
+          </p>
         </div>
-      )}
+        <Button variant="ghost" size="icon" onClick={onClose}>
+          ×
+        </Button>
+      </CardHeader>
+      <CardContent className="flex flex-col gap-4">
+        {error && (
+          <div className="rounded-lg border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">
+            操作失败：{error}
+          </div>
+        )}
 
-      {order.status === 'open' && <button onClick={requestCheckout}>发起结账</button>}
-      {order.status !== 'paid' && <button onClick={recordPayment}>记录收款</button>}
-    </section>
+        <div className="flex flex-wrap gap-2">
+          <Button variant="outline" size="sm" onClick={updatePartySize}>
+            改人数
+          </Button>
+          <Button variant="outline" size="sm" onClick={transferTable}>
+            换桌
+          </Button>
+          {sessionTables.length > 1 &&
+            sessionTables.map((t) => (
+              <Button key={t.id} variant="outline" size="sm" onClick={() => unmergeTable(t.id)}>
+                把 {t.tableNumber} 拆出去
+              </Button>
+            ))}
+        </div>
+
+        <Separator />
+
+        <ul className="flex flex-col gap-2">
+          {order.items.map((item) => (
+            <li key={item.id} className="flex items-center justify-between gap-3 text-sm">
+              <div>
+                <p className="font-medium text-foreground">
+                  {item.dishNameSnapshot} × {item.quantity}
+                </p>
+                <p className="text-muted-foreground">
+                  ¥{(Number(item.unitPriceSnapshot) * item.quantity).toFixed(2)}
+                </p>
+              </div>
+              <div className="flex shrink-0 items-center gap-2">
+                {item.roundNumber === 0 ? (
+                  <>
+                    <Badge variant="secondary">未提交</Badge>
+                    <Button
+                      variant="outline"
+                      size="icon"
+                      className="size-7"
+                      onClick={() => changeQty(item.id, item.quantity - 1)}
+                    >
+                      −
+                    </Button>
+                    <Button
+                      variant="outline"
+                      size="icon"
+                      className="size-7"
+                      onClick={() => changeQty(item.id, item.quantity + 1)}
+                    >
+                      +
+                    </Button>
+                    <Button variant="ghost" size="sm" onClick={() => removeItem(item.id)}>
+                      删除
+                    </Button>
+                  </>
+                ) : (
+                  <Badge className={KITCHEN_STATUS_BADGE_CLASS[item.kitchenStatus]}>
+                    {KITCHEN_STATUS_LABEL[item.kitchenStatus]}
+                  </Badge>
+                )}
+                {isManager && item.roundNumber > 0 && (
+                  <>
+                    <Button variant="ghost" size="sm" onClick={() => voidItem(item.id)}>
+                      作废
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() =>
+                        overrideItemPrice(item.id, String(Number(item.unitPriceSnapshot) * item.quantity))
+                      }
+                    >
+                      改价
+                    </Button>
+                  </>
+                )}
+              </div>
+            </li>
+          ))}
+        </ul>
+
+        {hasUnsubmitted && <Button onClick={submitCart}>提交给厨房</Button>}
+
+        <Separator />
+
+        <div className="flex flex-col gap-2">
+          <h3 className="text-sm font-medium text-muted-foreground">加菜（代客点餐）</h3>
+          {menu.map((category) => (
+            <div key={category.id} className="flex flex-col gap-1">
+              <p className="text-sm font-medium text-foreground">{category.name}</p>
+              <ul className="flex flex-col gap-1">
+                {category.dishes
+                  .filter((d) => d.isAvailable)
+                  .map((dish) => (
+                    <li key={dish.id} className="flex items-center justify-between gap-2 text-sm">
+                      <span className="text-muted-foreground">
+                        {dish.name} · ¥{Number(dish.price).toFixed(2)}
+                      </span>
+                      <Button variant="outline" size="sm" onClick={() => addItem(dish.id)}>
+                        加入
+                      </Button>
+                    </li>
+                  ))}
+              </ul>
+            </div>
+          ))}
+        </div>
+
+        <Separator />
+
+        <p className="text-sm text-foreground">
+          小计 ¥{Number(order.subtotal).toFixed(2)} － 折扣 ¥{Number(order.discountTotal).toFixed(2)} ＝ 合计 ¥
+          {Number(order.total).toFixed(2)}
+        </p>
+
+        {isManager && (
+          <div className="flex flex-wrap gap-2">
+            <Button variant="outline" size="sm" onClick={applyDiscount}>
+              整单打折
+            </Button>
+            <Button variant="outline" size="sm" onClick={overrideOrderTotal}>
+              整单直接改价
+            </Button>
+          </div>
+        )}
+
+        <div className="flex gap-2">
+          {order.status === 'open' && (
+            <Button variant="outline" onClick={requestCheckout}>
+              发起结账
+            </Button>
+          )}
+          {order.status !== 'paid' && <Button onClick={recordPayment}>记录收款</Button>}
+        </div>
+      </CardContent>
+    </Card>
   );
 }

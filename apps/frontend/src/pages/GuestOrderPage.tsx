@@ -3,10 +3,7 @@ import { useParams } from 'react-router-dom';
 import type { MenuCategory, OrderDetail } from '@restaurant/shared-types';
 import { api, setToken } from '../api/client';
 import { RealtimeProvider, RealtimeListener } from '../realtime/RealtimeContext';
-import { Button } from '@/components/ui/button';
-import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
-import { Separator } from '@/components/ui/separator';
 
 const STATUS_BADGE_CLASS: Record<string, string> = {
   pending: 'bg-status-pending text-status-pending-foreground',
@@ -14,13 +11,39 @@ const STATUS_BADGE_CLASS: Record<string, string> = {
   done: 'bg-status-done text-status-done-foreground',
 };
 
+// 图片占位图标：菜品还没有真实图片素材时的通用占位，不用 emoji
+function ImagePlaceholderIcon() {
+  return (
+    <svg
+      width="26"
+      height="26"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="oklch(62% 0.1 40)"
+      strokeWidth="1.7"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <rect x="3" y="3" width="18" height="18" rx="3" />
+      <circle cx="8.5" cy="8.5" r="1.5" />
+      <path d="M21 15l-5-5L5 21" />
+    </svg>
+  );
+}
+
 // 顾客扫码 / 桌台平板共用的点餐页（见 ARCHITECTURE.md 2.4：两者是同一套代码、同一权限）
+// 视觉方向：活力原生 App 风（高饱和橙红 + 圆角卡片，2026-08-20 跟用户对比三个方向后选定，
+// 见 design 稿）——这一页用自己专属的字体/配色（index.html 里的 Baloo 2 + Nunito Sans，
+// 以及这里直接写死的 oklch 值），不跟 index.css 里门店级的 modern/warm 主题 token 走同一套，
+// 因为这套视觉是专门给顾客点餐页选的固定方向，不是要新增第三个可切换的门店主题
 export default function GuestOrderPage() {
   const { tableId } = useParams<{ tableId: string }>();
   const tokenKind = `guest:${tableId}`;
 
   const [orderId, setOrderId] = useState<string | null>(null);
+  const [tableNumber, setTableNumber] = useState<string | null>(null);
   const [menu, setMenu] = useState<MenuCategory[]>([]);
+  const [activeCategoryId, setActiveCategoryId] = useState<string | null>(null);
   const [order, setOrder] = useState<OrderDetail | null>(null);
   const [cart, setCart] = useState<Record<string, number>>({});
   const [error, setError] = useState<string | null>(null);
@@ -43,15 +66,17 @@ export default function GuestOrderPage() {
 
     async function joinAndLoad() {
       try {
-        const joinRes = await api.post<{ sessionToken: string; orderId: string }>(
+        const joinRes = await api.post<{ sessionToken: string; orderId: string; tableNumber: string }>(
           `/table-sessions/${tableId}/join`,
           {},
         );
         setToken(tokenKind, joinRes.sessionToken);
         setOrderId(joinRes.orderId);
+        setTableNumber(joinRes.tableNumber);
 
         const categories = await api.get<MenuCategory[]>('/menu');
         setMenu(categories);
+        setActiveCategoryId(categories[0]?.id ?? null);
         await refreshOrder(joinRes.orderId);
       } catch (err) {
         if (err instanceof Error && err.message.includes('table_pending_clear')) {
@@ -106,15 +131,15 @@ export default function GuestOrderPage() {
 
   if (error) {
     return (
-      <div className="flex min-h-screen items-center justify-center bg-background p-6">
-        <p className="text-sm text-muted-foreground">{error}</p>
+      <div className="flex min-h-screen items-center justify-center bg-[oklch(98%_0.006_40)] p-6 font-['Nunito_Sans',system-ui,sans-serif]">
+        <p className="text-sm text-[oklch(45%_0.02_30)]">{error}</p>
       </div>
     );
   }
   if (!order) {
     return (
-      <div className="flex min-h-screen items-center justify-center bg-background p-6">
-        <p className="text-sm text-muted-foreground">加载中…</p>
+      <div className="flex min-h-screen items-center justify-center bg-[oklch(98%_0.006_40)] p-6 font-['Nunito_Sans',system-ui,sans-serif]">
+        <p className="text-sm text-[oklch(45%_0.02_30)]">加载中…</p>
       </div>
     );
   }
@@ -130,6 +155,8 @@ export default function GuestOrderPage() {
     done: '已完成',
   };
 
+  const activeCategory = menu.find((c) => c.id === activeCategoryId) ?? menu[0];
+
   return (
     <RealtimeProvider tokenKind={tokenKind}>
       <RealtimeListener event="connect" onEvent={() => orderId && refreshOrder(orderId).catch(() => {})} />
@@ -137,108 +164,165 @@ export default function GuestOrderPage() {
       <RealtimeListener event="item_added" onEvent={() => orderId && refreshOrder(orderId).catch(() => {})} />
       <RealtimeListener event="order_paid" onEvent={() => orderId && refreshOrder(orderId).catch(() => {})} />
       <RealtimeListener event="order_cancelled" onEvent={() => orderId && refreshOrder(orderId).catch(() => {})} />
-    <div className="min-h-screen bg-background pb-28">
-      <div className="mx-auto flex max-w-md flex-col gap-6 p-4">
-        <h1 className="text-lg font-semibold text-foreground">桌台 {tableId}</h1>
-
-        {order.status === 'awaiting_payment' && (
-          <div className="rounded-lg border border-border bg-muted px-3 py-2 text-sm text-muted-foreground">
-            已发起结账，请等待店员到桌结账
+      <div className="min-h-screen bg-[oklch(98%_0.006_40)] pb-32 font-['Nunito_Sans',system-ui,sans-serif] text-[oklch(22%_0.01_30)]">
+        <div className="mx-auto max-w-md">
+          <div className="flex items-baseline gap-2.5 rounded-b-[18px] bg-[oklch(60%_0.21_35)] px-5 pb-3 pt-3.5">
+            <h1 className="whitespace-nowrap font-['Baloo_2',system-ui,sans-serif] text-lg font-bold text-white">
+              桌台 {tableNumber ?? ''}
+            </h1>
+            <p className="truncate text-xs text-white/85">欢迎光临，点好菜提交给厨房就好啦</p>
           </div>
-        )}
-        {order.status === 'cancelled' && (
-          <div className="rounded-lg border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">
-            该订单已被店员取消
-          </div>
-        )}
 
-        <section className="flex flex-col gap-4">
-          {menu.map((category) => (
-            <div key={category.id} className="flex flex-col gap-2">
-              <h2 className="text-sm font-medium text-muted-foreground">{category.name}</h2>
-              <div className="flex flex-col gap-2">
-                {category.dishes?.map((dish) => (
-                  <Card key={dish.id}>
-                    <CardContent className="flex items-center justify-between gap-3 py-1">
-                      <div>
-                        <p className="text-sm font-medium text-foreground">
-                          {dish.name} · ¥{Number(dish.price).toFixed(2)}
-                        </p>
-                        {dish.description && (
-                          <p className="text-sm text-muted-foreground">{dish.description}</p>
-                        )}
+          <div className="flex flex-col gap-4 px-5 pt-4">
+            {order.status === 'awaiting_payment' && (
+              <div className="rounded-2xl bg-[oklch(93%_0.04_45)] px-4 py-2.5 text-sm text-[oklch(40%_0.1_40)]">
+                已发起结账，请等待店员到桌结账
+              </div>
+            )}
+            {order.status === 'cancelled' && (
+              <div className="rounded-2xl bg-[oklch(93%_0.06_25)] px-4 py-2.5 text-sm text-[oklch(45%_0.18_25)]">
+                该订单已被店员取消
+              </div>
+            )}
+
+            <div className="flex gap-2.5 overflow-x-auto">
+              {menu.map((category) => {
+                const isActive = category.id === activeCategory?.id;
+                return (
+                  <button
+                    key={category.id}
+                    type="button"
+                    onClick={() => setActiveCategoryId(category.id)}
+                    className={
+                      isActive
+                        ? 'shrink-0 whitespace-nowrap rounded-full bg-[oklch(60%_0.21_35)] px-5 py-2 text-sm font-bold text-white'
+                        : 'shrink-0 whitespace-nowrap rounded-full bg-[oklch(94%_0.01_40)] px-5 py-2 text-sm font-semibold text-[oklch(45%_0.02_30)]'
+                    }
+                  >
+                    {category.name}
+                  </button>
+                );
+              })}
+            </div>
+
+            <div className="flex flex-col gap-3.5">
+              {activeCategory?.dishes?.map((dish) => {
+                const qty = cart[dish.id] ?? 0;
+                return (
+                  <div
+                    key={dish.id}
+                    className="flex items-center gap-3.5 rounded-[20px] bg-white p-3.5 shadow-[0_2px_4px_oklch(20%_0.02_30_/_0.06),0_8px_20px_oklch(20%_0.02_30_/_0.08)]"
+                  >
+                    <div className="flex size-16 shrink-0 items-center justify-center rounded-2xl bg-[oklch(93%_0.04_45)]">
+                      <ImagePlaceholderIcon />
+                    </div>
+                    <div className="min-w-0 flex-1">
+                      <p className="mb-1 text-sm font-bold">{dish.name}</p>
+                      {dish.description && (
+                        <span className="mb-1 inline-block rounded-full bg-[oklch(88%_0.1_150)] px-2.5 py-0.5 text-[11px] font-bold text-[oklch(35%_0.1_150)]">
+                          {dish.description}
+                        </span>
+                      )}
+                      <div className="mt-1 font-['Baloo_2',system-ui,sans-serif] text-[17px] font-bold text-[oklch(58%_0.2_35)]">
+                        ¥{Number(dish.price).toFixed(2)}
                       </div>
-                      <div className="flex shrink-0 items-center gap-2">
-                        <Button
-                          variant="outline"
-                          size="icon"
-                          className="size-7"
+                    </div>
+                    <div className="flex shrink-0 items-center gap-2">
+                      {qty > 0 && (
+                        <button
+                          type="button"
                           onClick={() => addToCart(dish.id, -1)}
-                          disabled={!cart[dish.id]}
+                          className="flex size-7 items-center justify-center rounded-full bg-[oklch(94%_0.01_40)] text-base font-bold text-[oklch(45%_0.02_30)]"
                         >
                           −
-                        </Button>
-                        <span className="w-4 text-center text-sm font-medium">{cart[dish.id] ?? 0}</span>
-                        <Button size="icon" className="size-7" onClick={() => addToCart(dish.id, 1)}>
+                        </button>
+                      )}
+                      {qty > 0 && <span className="min-w-3.5 text-center text-sm font-bold">{qty}</span>}
+                      {qty > 0 ? (
+                        <button
+                          type="button"
+                          onClick={() => addToCart(dish.id, 1)}
+                          className="flex size-7 items-center justify-center rounded-full bg-[oklch(60%_0.21_35)] text-base font-bold text-white"
+                        >
                           +
-                        </Button>
-                      </div>
-                    </CardContent>
-                  </Card>
-                ))}
+                        </button>
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={() => addToCart(dish.id, 1)}
+                          className="rounded-full bg-[oklch(90%_0.05_45)] px-4 py-1.5 text-[13px] font-bold text-[oklch(45%_0.18_35)]"
+                        >
+                          加入
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+
+            <div className="flex flex-col gap-2 border-t border-[oklch(90%_0.01_40)] pt-4">
+              <h2 className="text-sm font-bold text-[oklch(45%_0.02_30)]">本桌已点</h2>
+              {order.items.length === 0 ? (
+                <p className="text-sm text-[oklch(55%_0.02_30)]">还没有点菜</p>
+              ) : (
+                <ul className="flex flex-col gap-2">
+                  {order.items.map((item) => (
+                    <li key={item.id} className="flex items-center justify-between gap-3 text-sm">
+                      <span>
+                        {item.dishNameSnapshot} × {item.quantity}
+                      </span>
+                      {item.roundNumber === 0 ? (
+                        <Badge variant="secondary">未提交</Badge>
+                      ) : (
+                        <Badge className={STATUS_BADGE_CLASS[item.kitchenStatus]}>
+                          {kitchenStatusLabel[item.kitchenStatus]}
+                        </Badge>
+                      )}
+                    </li>
+                  ))}
+                </ul>
+              )}
+              <div className="flex items-center justify-between pt-1 text-sm font-bold">
+                <span>合计</span>
+                <span>¥{Number(order.total).toFixed(2)}</span>
               </div>
             </div>
-          ))}
-        </section>
 
-        <Separator />
-
-        <section className="flex flex-col gap-2">
-          <h2 className="text-sm font-medium text-muted-foreground">本桌已点</h2>
-          {order.items.length === 0 ? (
-            <p className="text-sm text-muted-foreground">还没有点菜</p>
-          ) : (
-            <ul className="flex flex-col gap-2">
-              {order.items.map((item) => (
-                <li key={item.id} className="flex items-center justify-between gap-3 text-sm">
-                  <span className="text-foreground">
-                    {item.dishNameSnapshot} × {item.quantity}
-                  </span>
-                  {item.roundNumber === 0 ? (
-                    <Badge variant="secondary">未提交</Badge>
-                  ) : (
-                    <Badge className={STATUS_BADGE_CLASS[item.kitchenStatus]}>
-                      {kitchenStatusLabel[item.kitchenStatus]}
-                    </Badge>
-                  )}
-                </li>
-              ))}
-            </ul>
-          )}
-          <div className="flex items-center justify-between pt-1 text-sm font-medium text-foreground">
-            <span>合计</span>
-            <span>¥{Number(order.total).toFixed(2)}</span>
-          </div>
-        </section>
-
-        {order.status === 'open' && order.items.some((i) => i.roundNumber > 0) && (
-          <Button variant="outline" onClick={requestCheckout} disabled={busy}>
-            结账
-          </Button>
-        )}
-      </div>
-
-      {Object.keys(cart).length > 0 && (
-        <div className="fixed inset-x-0 bottom-0 border-t border-border bg-card px-4 py-3">
-          <div className="mx-auto flex max-w-md items-center justify-between gap-4">
-            <span className="text-sm font-medium text-foreground">待提交 ¥{cartTotal.toFixed(2)}</span>
-            <Button onClick={submitCart} disabled={busy}>
-              提交给厨房
-            </Button>
+            {order.status === 'open' && order.items.some((i) => i.roundNumber > 0) && (
+              <button
+                type="button"
+                onClick={requestCheckout}
+                disabled={busy}
+                className="rounded-full border-2 border-[oklch(60%_0.21_35)] py-2.5 text-sm font-bold text-[oklch(50%_0.2_35)] disabled:opacity-50"
+              >
+                结账
+              </button>
+            )}
           </div>
         </div>
-      )}
-    </div>
+
+        {Object.keys(cart).length > 0 && (
+          <div className="fixed inset-x-0 bottom-0 rounded-t-[24px] bg-[oklch(18%_0.01_30)] px-5 py-4">
+            <div className="mx-auto flex max-w-md items-center justify-between gap-4">
+              <div>
+                <div className="text-xs text-white/60">待提交</div>
+                <div className="font-['Baloo_2',system-ui,sans-serif] text-lg font-bold text-white">
+                  ¥{cartTotal.toFixed(2)}
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={submitCart}
+                disabled={busy}
+                className="rounded-full bg-[oklch(60%_0.21_35)] px-7 py-3 text-sm font-bold text-white disabled:opacity-50"
+              >
+                提交给厨房
+              </button>
+            </div>
+          </div>
+        )}
+      </div>
     </RealtimeProvider>
   );
 }

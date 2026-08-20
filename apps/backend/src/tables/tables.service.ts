@@ -206,9 +206,9 @@ export class TablesService {
   // 读到"还没开台"，各自建出一个会话——用 SELECT ... FOR UPDATE 锁住这一行桌台记录，
   // 让并发请求排队执行，而不是都通过检查。
   async joinOrAutoOpen(tableId: string, partySize?: number) {
-    const { session, created } = await this.prisma.$transaction(async (tx) => {
-      const locked = await tx.$queryRaw<{ id: string; status: string }[]>`
-        SELECT id, status FROM tables WHERE id = ${tableId} FOR UPDATE
+    const { session, created, tableNumber } = await this.prisma.$transaction(async (tx) => {
+      const locked = await tx.$queryRaw<{ id: string; status: string; tableNumber: string }[]>`
+        SELECT id, status, "tableNumber" FROM tables WHERE id = ${tableId} FOR UPDATE
       `;
       const table = locked[0];
       if (!table) throw new NotFoundException('桌台不存在');
@@ -219,7 +219,7 @@ export class TablesService {
           where: { status: { in: ['open', 'pending_checkout'] }, tables: { some: { tableId } } },
           include: { order: true },
         });
-        return { session: existing, created: false };
+        return { session: existing, created: false, tableNumber: table.tableNumber };
       }
 
       const newSession = await tx.tableSession.create({
@@ -231,7 +231,7 @@ export class TablesService {
         include: { order: true },
       });
       await tx.table.update({ where: { id: tableId }, data: { status: 'occupied' } });
-      return { session: newSession, created: true };
+      return { session: newSession, created: true, tableNumber: table.tableNumber };
     });
 
     if (created) {
@@ -245,6 +245,6 @@ export class TablesService {
       orderId: session.order!.id,
     });
 
-    return { sessionToken: token, orderId: session.order!.id };
+    return { sessionToken: token, orderId: session.order!.id, tableNumber };
   }
 }

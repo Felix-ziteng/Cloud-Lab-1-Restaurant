@@ -3,11 +3,27 @@ import { useParams } from 'react-router-dom';
 import type { OrderDetail } from '@restaurant/shared-types';
 import { api, getToken } from '../api/client';
 import { RealtimeProvider, RealtimeListener } from '../realtime/RealtimeContext';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Badge } from '@/components/ui/badge';
+import { Separator } from '@/components/ui/separator';
 
 const KITCHEN_STATUS_LABEL: Record<string, string> = {
   pending: '待处理',
   preparing: '制作中',
   done: '已完成',
+};
+
+const KITCHEN_STATUS_BADGE_CLASS: Record<string, string> = {
+  pending: 'bg-status-pending text-status-pending-foreground',
+  preparing: 'bg-status-preparing text-status-preparing-foreground',
+  done: 'bg-status-done text-status-done-foreground',
+};
+
+const ORDER_STATUS_LABEL: Record<string, string> = {
+  open: '制作中',
+  awaiting_payment: '待结账',
+  paid: '已完成',
+  cancelled: '已取消',
 };
 
 const DELIVERY_STATUS_LABEL: Record<string, string> = {
@@ -43,57 +59,91 @@ export default function OrderStatusPage() {
     if (hasToken) refresh();
   }, [hasToken, refresh]);
 
-  if (!orderId) return <p>缺少订单信息</p>;
-
-  if (!hasToken) {
+  if (!orderId) {
     return (
-      <div>
-        <p>没有找到这张订单的登录信息。</p>
-        <p>
-          <a href="/track-order">点这里用订单号 + 手机号查询</a>
-        </p>
+      <div className="flex min-h-screen items-center justify-center bg-background p-6">
+        <p className="text-sm text-muted-foreground">缺少订单信息</p>
       </div>
     );
   }
 
-  if (error) return <p>{error}</p>;
-  if (!order) return <p>加载中…</p>;
+  if (!hasToken) {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-background p-6">
+        <div className="mx-auto flex max-w-sm flex-col gap-2 text-center">
+          <p className="text-sm text-muted-foreground">没有找到这张订单的登录信息。</p>
+          <a href="/track-order" className="text-sm text-primary underline underline-offset-2">
+            点这里用订单号 + 手机号查询
+          </a>
+        </div>
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-background p-6">
+        <p className="text-sm text-destructive">{error}</p>
+      </div>
+    );
+  }
+  if (!order) {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-background p-6">
+        <p className="text-sm text-muted-foreground">加载中…</p>
+      </div>
+    );
+  }
 
   return (
     <RealtimeProvider tokenKind={tokenKind}>
       <RealtimeListener event="connect" onEvent={() => refresh()} />
       <RealtimeListener event="order_updated" onEvent={() => refresh()} />
-      <div>
-        <h1>订单 #{order.orderNumber}</h1>
-        <p>类型：{order.type === 'delivery' ? '配送到家' : '到店自提'}</p>
-        <p>
-          状态：
-          {order.status === 'open' && '制作中'}
-          {order.status === 'awaiting_payment' && '待结账'}
-          {order.status === 'paid' && '已完成'}
-          {order.status === 'cancelled' && '已取消'}
-        </p>
+      <div className="min-h-screen bg-background p-4">
+        <div className="mx-auto max-w-md">
+          <Card>
+            <CardHeader className="flex-row items-center justify-between">
+              <CardTitle>订单 #{order.orderNumber}</CardTitle>
+              <Badge variant="secondary">{ORDER_STATUS_LABEL[order.status]}</Badge>
+            </CardHeader>
+            <CardContent className="flex flex-col gap-4">
+              <div className="flex flex-col gap-1 text-sm text-muted-foreground">
+                <p>类型：{order.type === 'delivery' ? '配送到家' : '到店自提'}</p>
+                {order.type === 'delivery' && order.deliveryInfo && (
+                  <p>配送状态：{DELIVERY_STATUS_LABEL[order.deliveryInfo.status]}</p>
+                )}
+                {order.type === 'takeout' && order.pickupTime && (
+                  <p>期望取餐时间：{new Date(order.pickupTime).toLocaleString()}</p>
+                )}
+              </div>
 
-        {order.type === 'delivery' && order.deliveryInfo && (
-          <p>配送状态：{DELIVERY_STATUS_LABEL[order.deliveryInfo.status]}</p>
-        )}
-        {order.type === 'takeout' && order.pickupTime && (
-          <p>期望取餐时间：{new Date(order.pickupTime).toLocaleString()}</p>
-        )}
+              <Separator />
 
-        <section>
-          <h2>菜品</h2>
-          <ul>
-            {order.items.map((item) => (
-              <li key={item.id}>
-                {item.dishNameSnapshot} x{item.quantity} — {KITCHEN_STATUS_LABEL[item.kitchenStatus]}
-              </li>
-            ))}
-          </ul>
-          <p>合计：¥{Number(order.total).toFixed(2)}（到店/送达时付款）</p>
-        </section>
+              <div className="flex flex-col gap-2">
+                <h2 className="text-sm font-medium text-muted-foreground">菜品</h2>
+                <ul className="flex flex-col gap-2">
+                  {order.items.map((item) => (
+                    <li key={item.id} className="flex items-center justify-between gap-2 text-sm">
+                      <span className="text-foreground">
+                        {item.dishNameSnapshot} × {item.quantity}
+                      </span>
+                      <Badge className={KITCHEN_STATUS_BADGE_CLASS[item.kitchenStatus]}>
+                        {KITCHEN_STATUS_LABEL[item.kitchenStatus]}
+                      </Badge>
+                    </li>
+                  ))}
+                </ul>
+                <p className="text-sm font-medium text-foreground">
+                  合计：¥{Number(order.total).toFixed(2)}（到店/送达时付款）
+                </p>
+              </div>
 
-        <p>记好订单号 #{order.orderNumber}，换设备/清缓存后可以用它 + 手机号重新查到这张单。</p>
+              <p className="text-sm text-muted-foreground">
+                记好订单号 #{order.orderNumber}，换设备/清缓存后可以用它 + 手机号重新查到这张单。
+              </p>
+            </CardContent>
+          </Card>
+        </div>
       </div>
     </RealtimeProvider>
   );

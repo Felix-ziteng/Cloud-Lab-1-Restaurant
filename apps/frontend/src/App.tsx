@@ -4,7 +4,13 @@ import type { StoreConfig } from '@restaurant/shared-types';
 import { api } from './api/client';
 import { applyTheme } from './theme/applyTheme';
 import GuestOrderPage from './pages/GuestOrderPage';
-import FrontDeskPage from './pages/FrontDeskPage';
+import FrontDeskLayout from './pages/FrontDeskLayout';
+import FrontDeskTablesPage from './pages/FrontDeskTablesPage';
+import FrontDeskOrdersPage from './pages/FrontDeskOrdersPage';
+import FrontDeskReservationsPage from './pages/FrontDeskReservationsPage';
+import FrontDeskDeliveryPage from './pages/FrontDeskDeliveryPage';
+import FrontDeskReportsPage from './pages/FrontDeskReportsPage';
+import FrontDeskManagementPage from './pages/FrontDeskManagementPage';
 import KitchenPage from './pages/KitchenPage';
 import TakeoutOrderPage from './pages/TakeoutOrderPage';
 import TrackOrderPage from './pages/TrackOrderPage';
@@ -15,7 +21,7 @@ import OrderStatusPage from './pages/OrderStatusPage';
 //   /takeout           -> 外卖/自提顾客自助下单（不需要登录，没有桌台锚点）
 //   /order-status/:id  -> 外卖/自提顾客查看自己这单的状态（凭下单时签发的 guest token）
 //   /track-order       -> 换设备/清了缓存后，用"订单号 + 手机号"找回订单
-//   /front-desk        -> 店员 / 店长登录站点
+//   /front-desk        -> 店员 / 店长登录站点，左侧边栏 + 子路由（桌台/历史订单/预定/外卖/报表/管理）
 //   /kitchen           -> 厨房 KDS 看板
 // 骑手自助端（/rider）暂时不需要：配送状态改为店员在前台直接记录，见 DeliveryPanel
 function App() {
@@ -35,7 +41,14 @@ function App() {
       <Route path="/takeout" element={<TakeoutOrderPage />} />
       <Route path="/order-status/:orderId" element={<OrderStatusPage />} />
       <Route path="/track-order" element={<TrackOrderPage />} />
-      <Route path="/front-desk" element={<FrontDeskPage />} />
+      <Route path="/front-desk" element={<FrontDeskLayout />}>
+        <Route index element={<FrontDeskTablesPage />} />
+        <Route path="orders" element={<FrontDeskOrdersPage />} />
+        <Route path="reservations" element={<FrontDeskReservationsPage />} />
+        <Route path="delivery" element={<FrontDeskDeliveryPage />} />
+        <Route path="reports" element={<FrontDeskReportsPage />} />
+        <Route path="admin" element={<FrontDeskManagementPage />} />
+      </Route>
       <Route path="/kitchen" element={<KitchenPage />} />
     </Routes>
   );

@@ -10,21 +10,28 @@ const RealtimeContext = createContext<Socket | null>(null);
 // 只在挂载时读一次 token：调用方负责保证挂载这个 Provider 的时候 token 已经写进
 // localStorage 了（比如登录成功之后、或者顾客 join 桌台成功之后再渲染这一层），
 // 不在这里轮询 localStorage 等 token 出现。
-export function RealtimeProvider({ tokenKind, children }: { tokenKind: TokenKind; children: ReactNode }) {
+//
+// KDS 是唯一不用 token 的用法：不传 tokenKind，传 channel="kitchen"，网关那边握手时
+// 认这个 channel 直接放行加入 kitchen 房间（见 realtime.gateway.ts），不走 JWT 校验。
+type RealtimeProviderProps =
+  | { tokenKind: TokenKind; channel?: undefined; children: ReactNode }
+  | { tokenKind?: undefined; channel: string; children: ReactNode };
+
+export function RealtimeProvider({ tokenKind, channel, children }: RealtimeProviderProps) {
   const [socket, setSocket] = useState<Socket | null>(null);
 
   useEffect(() => {
-    const token = getToken(tokenKind);
-    if (!token) return;
+    const auth = channel ? { channel } : { token: getToken(tokenKind!) };
+    if (!channel && !auth.token) return;
 
-    const instance = SOCKET_URL ? io(SOCKET_URL, { auth: { token } }) : io({ auth: { token } });
+    const instance = SOCKET_URL ? io(SOCKET_URL, { auth }) : io({ auth });
     setSocket(instance);
 
     return () => {
       instance.disconnect();
       setSocket(null);
     };
-  }, [tokenKind]);
+  }, [tokenKind, channel]);
 
   return <RealtimeContext.Provider value={socket}>{children}</RealtimeContext.Provider>;
 }

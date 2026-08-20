@@ -1,6 +1,12 @@
 import { useEffect, useState } from 'react';
 import type { OrderDetail, OrderListItem } from '@restaurant/shared-types';
 import { api } from '../api/client';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Badge } from '@/components/ui/badge';
+import { Separator } from '@/components/ui/separator';
+import { Button } from '@/components/ui/button';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 
 const STATUS_LABEL: Record<string, string> = {
   open: '进行中',
@@ -69,59 +75,101 @@ export default function OrderHistoryPanel({ from, to }: Props) {
   }
 
   return (
-    <section>
-      <h2>{from && to ? `${from} 订单明细` : '历史订单'}</h2>
-      {error && <p style={{ color: 'red' }}>操作失败：{error}</p>}
+    <Card>
+      <CardHeader className="flex-row items-center justify-between gap-4">
+        <CardTitle>{from && to ? `${from} 订单明细` : '历史订单'}</CardTitle>
+        <Select value={statusFilter || 'all'} onValueChange={(v) => setStatusFilter(v === 'all' ? '' : v)}>
+          <SelectTrigger size="sm" className="w-32">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">全部状态</SelectItem>
+            <SelectItem value="open">进行中</SelectItem>
+            <SelectItem value="awaiting_payment">待结账</SelectItem>
+            <SelectItem value="paid">已支付</SelectItem>
+            <SelectItem value="cancelled">已取消</SelectItem>
+          </SelectContent>
+        </Select>
+      </CardHeader>
+      <CardContent className="flex flex-col gap-4">
+        {error && (
+          <div className="rounded-lg border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">
+            操作失败：{error}
+          </div>
+        )}
 
-      <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)}>
-        <option value="">全部状态</option>
-        <option value="open">进行中</option>
-        <option value="awaiting_payment">待结账</option>
-        <option value="paid">已支付</option>
-        <option value="cancelled">已取消</option>
-      </select>
-
-      <ul>
-        {orders.map((order) => (
-          <li key={order.id}>
-            <button onClick={() => setSelectedId(order.id)}>
-              {new Date(order.createdAt).toLocaleString()} · {tableLabel(order)} · ¥{Number(order.total).toFixed(2)} ·{' '}
-              {STATUS_LABEL[order.status]}
-            </button>
-          </li>
-        ))}
-        {orders.length === 0 && <li>没有符合条件的订单</li>}
-      </ul>
-
-      {detail && (
-        <div>
-          <h3>
-            订单详情 · {TYPE_LABEL[detail.type]} · {STATUS_LABEL[detail.status]}
-            <button onClick={() => setSelectedId(null)}>关闭</button>
-          </h3>
-          <ul>
-            {detail.items.map((item) => (
-              <li key={item.id}>
-                {item.dishNameSnapshot} x{item.quantity} — ¥{(Number(item.unitPriceSnapshot) * item.quantity).toFixed(2)}
-                {item.roundNumber > 0 && ` — ${KITCHEN_STATUS_LABEL[item.kitchenStatus]}`}
-              </li>
+        <Table>
+          <TableHeader>
+            <TableRow>
+              <TableHead>时间</TableHead>
+              <TableHead>桌台/来源</TableHead>
+              <TableHead>金额</TableHead>
+              <TableHead>状态</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {orders.map((order) => (
+              <TableRow key={order.id} className="cursor-pointer" onClick={() => setSelectedId(order.id)}>
+                <TableCell>{new Date(order.createdAt).toLocaleString()}</TableCell>
+                <TableCell>{tableLabel(order)}</TableCell>
+                <TableCell>¥{Number(order.total).toFixed(2)}</TableCell>
+                <TableCell>
+                  <Badge variant="secondary">{STATUS_LABEL[order.status]}</Badge>
+                </TableCell>
+              </TableRow>
             ))}
-          </ul>
-          <p>
-            小计 ¥{Number(detail.subtotal).toFixed(2)} － 折扣 ¥{Number(detail.discountTotal).toFixed(2)} ＝ 合计 ¥
-            {Number(detail.total).toFixed(2)}
-          </p>
-          {detail.payments.length > 0 && (
-            <ul>
-              {detail.payments.map((p) => (
-                <li key={p.id}>
-                  收款 ¥{Number(p.amount).toFixed(2)}（{p.method}）· {new Date(p.collectedAt).toLocaleString()}
-                </li>
-              ))}
-            </ul>
-          )}
-        </div>
-      )}
-    </section>
+            {orders.length === 0 && (
+              <TableRow>
+                <TableCell colSpan={4} className="text-center text-muted-foreground">
+                  没有符合条件的订单
+                </TableCell>
+              </TableRow>
+            )}
+          </TableBody>
+        </Table>
+
+        {detail && (
+          <>
+            <Separator />
+            <div className="flex flex-col gap-3">
+              <div className="flex items-center justify-between">
+                <h3 className="text-sm font-medium text-foreground">
+                  订单详情 · {TYPE_LABEL[detail.type]} · {STATUS_LABEL[detail.status]}
+                </h3>
+                <Button variant="ghost" size="sm" onClick={() => setSelectedId(null)}>
+                  关闭
+                </Button>
+              </div>
+              <ul className="flex flex-col gap-1 text-sm">
+                {detail.items.map((item) => (
+                  <li key={item.id} className="flex items-center justify-between gap-2">
+                    <span className="text-foreground">
+                      {item.dishNameSnapshot} × {item.quantity}
+                    </span>
+                    <span className="text-muted-foreground">
+                      ¥{(Number(item.unitPriceSnapshot) * item.quantity).toFixed(2)}
+                      {item.roundNumber > 0 && ` · ${KITCHEN_STATUS_LABEL[item.kitchenStatus]}`}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+              <p className="text-sm text-foreground">
+                小计 ¥{Number(detail.subtotal).toFixed(2)} － 折扣 ¥{Number(detail.discountTotal).toFixed(2)} ＝ 合计 ¥
+                {Number(detail.total).toFixed(2)}
+              </p>
+              {detail.payments.length > 0 && (
+                <ul className="flex flex-col gap-1 text-sm text-muted-foreground">
+                  {detail.payments.map((p) => (
+                    <li key={p.id}>
+                      收款 ¥{Number(p.amount).toFixed(2)}（{p.method}）· {new Date(p.collectedAt).toLocaleString()}
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+          </>
+        )}
+      </CardContent>
+    </Card>
   );
 }

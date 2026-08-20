@@ -1,57 +1,40 @@
-import { useCallback, useEffect, useState, type FormEvent } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import type { KitchenQueueItem } from '@restaurant/shared-types';
-import { api, getToken, setToken, clearToken, onAuthInvalidated } from '../api/client';
+import { api } from '../api/client';
 import { RealtimeProvider, RealtimeListener } from '../realtime/RealtimeContext';
+import { Button } from '@/components/ui/button';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Badge } from '@/components/ui/badge';
 
-// 厨房 KDS 看板：设计上是站点级访问、无个人登录（见 API_DESIGN.md 第 2 节），
-// 但站点级令牌的签发流程还没做（见 auth.types.ts），MVP 阶段先借用店员 PIN 登录顶上
+const STATUS_LABEL: Record<string, string> = {
+  pending: '待处理',
+  preparing: '制作中',
+};
+
+const STATUS_BADGE_CLASS: Record<string, string> = {
+  pending: 'bg-status-pending text-status-pending-foreground',
+  preparing: 'bg-status-preparing text-status-preparing-foreground',
+};
+
+// 厨房 KDS 看板：站点级访问，不登录（2026-08-20 决策，见 kitchen.controller.ts）——
+// 这台设备固定摆在厨房，谁都能看谁都能操作，不需要区分是哪个店员在标记完成
 export default function KitchenPage() {
-  const [pin, setPin] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [queue, setQueue] = useState<KitchenQueueItem[]>([]);
 
-  const loggedIn = Boolean(getToken('staffToken'));
-
-  function logout() {
-    clearToken('staffToken');
-    setQueue([]);
-    setError(null);
-  }
-
-  // 账号失效是 client.ts 统一广播的（任何用 staffToken 发的请求收到 401 都会触发），
-  // 轮询定时器发的请求也会走到这里退回登录页，不用在 loadQueue 里单独接
-  useEffect(() => {
-    return onAuthInvalidated('staffToken', () => {
-      logout();
-      setError('登录状态已失效，请重新输入 PIN 码登录');
-    });
-  }, []);
-
   const loadQueue = useCallback(async () => {
-    const res = await api.get<KitchenQueueItem[]>('/order-items/queue', 'staffToken');
+    const res = await api.get<KitchenQueueItem[]>('/order-items/queue');
     setQueue(res);
   }, []);
 
   useEffect(() => {
-    if (!loggedIn) return;
-    loadQueue().catch(() => {});
-  }, [loggedIn, loadQueue]);
-
-  async function handleLogin(e: FormEvent) {
-    e.preventDefault();
-    setError(null);
-    try {
-      const res = await api.post<{ token: string }>('/auth/staff/login', { pin });
-      setToken('staffToken', res.token);
-    } catch {
-      setError('PIN 码不正确');
-    }
-  }
+    loadQueue().catch(() => setError('加载失败，请刷新重试'));
+  }, [loadQueue]);
 
   async function markStatus(itemId: string, status: 'preparing' | 'done') {
     setError(null);
     try {
-      await api.patch(`/order-items/${itemId}/kitchen-status`, { status }, 'staffToken');
+      await api.patch(`/order-items/${itemId}/kitchen-status`, { status });
       await loadQueue();
     } catch (err) {
       setError(err instanceof Error ? err.message : '操作失败');
@@ -63,47 +46,56 @@ export default function KitchenPage() {
     return tableNumbers ?? item.order.type;
   }
 
-  if (!loggedIn) {
-    return (
-      <form onSubmit={handleLogin}>
-        <h1>厨房看板登录</h1>
-        <input
-          type="password"
-          inputMode="numeric"
-          placeholder="PIN 码"
-          value={pin}
-          onChange={(e) => setPin(e.target.value)}
-        />
-        <button type="submit">登录</button>
-        {error && <p>{error}</p>}
-      </form>
-    );
-  }
-
   return (
-    <RealtimeProvider tokenKind="staffToken">
+    <RealtimeProvider channel="kitchen">
       <RealtimeListener event="connect" onEvent={() => loadQueue().catch(() => {})} />
       <RealtimeListener event="new_order_item" onEvent={() => loadQueue().catch(() => {})} />
       <RealtimeListener event="item_status_changed" onEvent={() => loadQueue().catch(() => {})} />
-      <div>
-        <h1>
-          厨房看板
-          <button onClick={logout}>退出登录</button>
-        </h1>
-        {error && <p style={{ color: 'red' }}>操作失败：{error}</p>}
-        <ul>
-          {queue.map((item) => (
-            <li key={item.id}>
-              [{tableLabel(item)}] {item.dishNameSnapshot} x{item.quantity}
-              {item.notes && `（${item.notes}）`} — {item.kitchenStatus === 'pending' ? '待处理' : '制作中'}
-              {item.kitchenStatus === 'pending' && (
-                <button onClick={() => markStatus(item.id, 'preparing')}>开始制作</button>
-              )}
-              <button onClick={() => markStatus(item.id, 'done')}>完成</button>
-            </li>
-          ))}
-          {queue.length === 0 && <li>暂无待处理订单</li>}
-        </ul>
+      <div className="min-h-screen bg-background p-6">
+        <div className="mx-auto flex max-w-6xl flex-col gap-4">
+          <h1 className="text-xl font-semibold text-foreground">厨房看板</h1>
+
+          {error && (
+            <div className="rounded-lg border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">
+              操作失败：{error}
+            </div>
+          )}
+
+          {queue.length === 0 ? (
+            <p className="text-sm text-muted-foreground">暂无待处理订单</p>
+          ) : (
+            <div className="grid grid-cols-[repeat(auto-fill,minmax(260px,1fr))] gap-4">
+              {queue.map((item) => (
+                <Card key={item.id}>
+                  <CardHeader className="flex-row items-center justify-between">
+                    <CardTitle className="text-base">{tableLabel(item)}</CardTitle>
+                    <Badge className={STATUS_BADGE_CLASS[item.kitchenStatus]}>
+                      {STATUS_LABEL[item.kitchenStatus]}
+                    </Badge>
+                  </CardHeader>
+                  <CardContent className="flex flex-col gap-3">
+                    <div>
+                      <p className="text-base font-medium text-foreground">
+                        {item.dishNameSnapshot} × {item.quantity}
+                      </p>
+                      {item.notes && <p className="text-sm text-muted-foreground">备注：{item.notes}</p>}
+                    </div>
+                    <div className="flex gap-2">
+                      {item.kitchenStatus === 'pending' && (
+                        <Button variant="outline" className="flex-1" onClick={() => markStatus(item.id, 'preparing')}>
+                          开始制作
+                        </Button>
+                      )}
+                      <Button className="flex-1" onClick={() => markStatus(item.id, 'done')}>
+                        完成
+                      </Button>
+                    </div>
+                  </CardContent>
+                </Card>
+              ))}
+            </div>
+          )}
+        </div>
       </div>
     </RealtimeProvider>
   );

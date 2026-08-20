@@ -2,12 +2,24 @@ import { useEffect, useState, type FormEvent } from 'react';
 import type { Reservation, TableWithSession } from '@restaurant/shared-types';
 import { api } from '../api/client';
 import { useRealtimeEvent } from '../realtime/RealtimeContext';
+import { Button } from '@/components/ui/button';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Input } from '@/components/ui/input';
+import { Badge } from '@/components/ui/badge';
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 
 const STATUS_LABEL: Record<string, string> = {
   pending: '待到店',
   arrived: '已到店',
   cancelled: '已取消',
   no_show: '未到',
+};
+
+const STATUS_BADGE_VARIANT: Record<string, 'secondary' | 'outline'> = {
+  pending: 'secondary',
+  arrived: 'secondary',
+  cancelled: 'outline',
+  no_show: 'outline',
 };
 
 // 到点提醒是系统内高亮，不是外部通知（见 DATA_MODEL.md 3.5）：预定时间在 30 分钟内、
@@ -94,48 +106,100 @@ export default function ReservationsPanel() {
   }
 
   return (
-    <section>
-      <h2>预定管理</h2>
-      {error && <p style={{ color: 'red' }}>操作失败：{error}</p>}
+    <Card>
+      <CardHeader>
+        <CardTitle>预定管理</CardTitle>
+      </CardHeader>
+      <CardContent className="flex flex-col gap-4">
+        {error && (
+          <div className="rounded-lg border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">
+            操作失败：{error}
+          </div>
+        )}
 
-      <ul>
-        {reservations.map((r) => (
-          <li key={r.id} style={isUpcoming(r) ? { color: 'red', fontWeight: 'bold' } : undefined}>
-            {new Date(r.reservedTime).toLocaleString()} · {r.customerName} · {r.phone} · {r.partySize}人 ·{' '}
-            {STATUS_LABEL[r.status]}
-            {r.note && ` · 备注：${r.note}`}
-            {r.status === 'pending' && (
-              <>
-                <button onClick={() => arrive(r.id)}>到店开台</button>
-                <button onClick={() => cancelReservation(r.id)}>取消</button>
-              </>
+        <Table>
+          <TableHeader>
+            <TableRow>
+              <TableHead>预定时间</TableHead>
+              <TableHead>客人</TableHead>
+              <TableHead>人数</TableHead>
+              <TableHead>状态</TableHead>
+              <TableHead>备注</TableHead>
+              <TableHead />
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {reservations.map((r) => (
+              <TableRow key={r.id} className={isUpcoming(r) ? 'bg-destructive/10' : undefined}>
+                <TableCell className={isUpcoming(r) ? 'font-semibold text-destructive' : undefined}>
+                  {new Date(r.reservedTime).toLocaleString()}
+                </TableCell>
+                <TableCell>
+                  {r.customerName} · {r.phone}
+                </TableCell>
+                <TableCell>{r.partySize} 人</TableCell>
+                <TableCell>
+                  <Badge variant={STATUS_BADGE_VARIANT[r.status]}>{STATUS_LABEL[r.status]}</Badge>
+                </TableCell>
+                <TableCell className="text-muted-foreground">{r.note ?? '—'}</TableCell>
+                <TableCell className="text-right">
+                  {r.status === 'pending' && (
+                    <div className="flex justify-end gap-2">
+                      <Button variant="outline" size="sm" onClick={() => arrive(r.id)}>
+                        到店开台
+                      </Button>
+                      <Button variant="ghost" size="sm" onClick={() => cancelReservation(r.id)}>
+                        取消
+                      </Button>
+                    </div>
+                  )}
+                </TableCell>
+              </TableRow>
+            ))}
+            {reservations.length === 0 && (
+              <TableRow>
+                <TableCell colSpan={6} className="text-center text-muted-foreground">
+                  暂无预定
+                </TableCell>
+              </TableRow>
             )}
-          </li>
-        ))}
-        {reservations.length === 0 && <li>暂无预定</li>}
-      </ul>
+          </TableBody>
+        </Table>
 
-      <form onSubmit={createReservation}>
-        <input
-          placeholder="客人姓名"
-          value={form.customerName}
-          onChange={(e) => setForm({ ...form, customerName: e.target.value })}
-        />
-        <input placeholder="电话" value={form.phone} onChange={(e) => setForm({ ...form, phone: e.target.value })} />
-        <input
-          placeholder="人数"
-          type="number"
-          value={form.partySize}
-          onChange={(e) => setForm({ ...form, partySize: e.target.value })}
-        />
-        <input
-          type="datetime-local"
-          value={form.reservedTime}
-          onChange={(e) => setForm({ ...form, reservedTime: e.target.value })}
-        />
-        <input placeholder="备注（可选）" value={form.note} onChange={(e) => setForm({ ...form, note: e.target.value })} />
-        <button type="submit">新增预定</button>
-      </form>
-    </section>
+        <form onSubmit={createReservation} className="flex flex-wrap items-center gap-2">
+          <Input
+            placeholder="客人姓名"
+            className="max-w-32"
+            value={form.customerName}
+            onChange={(e) => setForm({ ...form, customerName: e.target.value })}
+          />
+          <Input
+            placeholder="电话"
+            className="max-w-36"
+            value={form.phone}
+            onChange={(e) => setForm({ ...form, phone: e.target.value })}
+          />
+          <Input
+            placeholder="人数"
+            type="number"
+            className="w-20"
+            value={form.partySize}
+            onChange={(e) => setForm({ ...form, partySize: e.target.value })}
+          />
+          <Input
+            type="datetime-local"
+            value={form.reservedTime}
+            onChange={(e) => setForm({ ...form, reservedTime: e.target.value })}
+          />
+          <Input
+            placeholder="备注（可选）"
+            className="max-w-40"
+            value={form.note}
+            onChange={(e) => setForm({ ...form, note: e.target.value })}
+          />
+          <Button type="submit">新增预定</Button>
+        </form>
+      </CardContent>
+    </Card>
   );
 }

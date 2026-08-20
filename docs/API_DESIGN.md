@@ -17,7 +17,7 @@
 |---|---|---|
 | 桌台会话（顾客手机 / 桌台平板） | 加入会话时换取的 session token | 只能读写自己绑定的 `table_session_id` / `order_id`，看不到别的桌 |
 | 店员 / 店长账号 | PIN 码登录换取的 JWT，带 `role` | `staff` 看不到敏感操作接口；`manager` 额外解锁改价/打折/作废/菜单管理 |
-| 厨房 KDS | 复用店员 PIN 登录换取的同一种 JWT | 标记完成不属于敏感操作，不需要单独的站点级令牌/个人追责，直接借用店员账号体系即可（决策记录：曾设想过无个人登录的站点级令牌，评估后认为收益不足以撑起单独的签发/预配置流程，维持现状） |
+| 厨房 KDS | 无——站点级访问，不登录 | 标记完成不属于敏感操作，也不需要个人追责；`/api/order-items/*` 不挂鉴权守卫。真正兜住暴露面的是 `ops/Caddyfile` 的白名单，这两个接口不在其中，公网隧道天然碰不到，只有厨房设备所在局域网能访问（决策记录：曾评估过无个人登录的站点级 JWT，因收益撑不起单独签发/预配置流程而放弃——但那次评估针对的是"要不要发令牌"，不代表这两个接口必须挂在店员登录后面，2026-08-20 修正为直接不鉴权） |
 
 **决策记录：店员/店长登录用 PIN 码。** 理由：前台/桌台等共享硬件上切换操作人非常频繁，PIN 码输入快、无需记忆复杂密码，比工号+密码更适合这个场景。
 
@@ -39,7 +39,7 @@
 |---|---|---|
 | `table:{table_session_id}` | 该桌所有设备（顾客手机 + 桌台平板） | `item_added` `item_status_changed` `checkout_requested` `order_paid` |
 | `order:{order_id}` | 该订单的顾客设备——外卖/自提顾客自助下单没有桌台可绑定，走这个房间（guest token 的 `tableSessionId` 为空，见 2. 身份与会话模型） | `item_added` `item_status_changed` `order_paid` `order_updated` |
-| `kitchen` | 所有 KDS 设备（复用店员登录）+ 打印代理（`apps/print-agent`，用 `PRINT_AGENT_TOKEN` 直连，不是 JWT） | `new_order_item` `item_status_changed` `print_job_created` |
+| `kitchen` | 所有 KDS 设备（不登录，握手传 `channel: 'kitchen'` 而不是 token）+ 打印代理（`apps/print-agent`，用 `PRINT_AGENT_TOKEN` 直连，不是 JWT） | `new_order_item` `item_status_changed` `print_job_created` |
 | `frontdesk` | 前台/管理终端 | `table_status_changed` `checkout_requested` `reservation_reminder` `delivery_status_changed` |
 
 ## 5. 核心 REST 端点
@@ -105,8 +105,8 @@ POST   /api/orders/:id/price-adjustments 改价/打折/赠菜/作废（仅 manag
 ### 厨房
 
 ```
-GET   /api/order-items/queue                出品队列（staff，KDS 复用店员登录，见 2. 身份与会话模型）
-PATCH /api/order-items/:id/kitchen-status   { status: preparing | done }（staff）
+GET   /api/order-items/queue                出品队列（不鉴权，站点级访问，见 2. 身份与会话模型）
+PATCH /api/order-items/:id/kitchen-status   { status: preparing | done }（不鉴权，同上）
 ```
 
 ### 配送
