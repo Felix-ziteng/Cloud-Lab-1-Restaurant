@@ -1,11 +1,13 @@
 import { useCallback, useEffect, useState, type FormEvent } from 'react';
 import type { StoreConfig, TableWithSession } from '@restaurant/shared-types';
 import { api, setToken, getToken, clearToken, onAuthInvalidated } from '../api/client';
+import { RealtimeProvider, RealtimeListener } from '../realtime/RealtimeContext';
 import ManagementPanel from '../components/ManagementPanel';
 import OrderDetailPanel from '../components/OrderDetailPanel';
 import OrderHistoryPanel from '../components/OrderHistoryPanel';
 import ReservationsPanel from '../components/ReservationsPanel';
 import DeliveryPanel from '../components/DeliveryPanel';
+import ReportsPanel from '../components/ReportsPanel';
 
 const TABLE_STATUS_LABEL: Record<string, string> = {
   idle: '空闲',
@@ -57,9 +59,6 @@ export default function FrontDeskPage() {
   useEffect(() => {
     if (!loggedIn) return;
     loadTables().catch(() => {});
-    // 还没接 WebSocket，先用轮询看到其他终端的变化（比如厨房把菜标记完成）
-    const timer = setInterval(() => loadTables().catch(() => {}), 5000);
-    return () => clearInterval(timer);
   }, [loggedIn, loadTables]);
 
   async function handleLogin(e: FormEvent) {
@@ -131,6 +130,11 @@ export default function FrontDeskPage() {
   const selectedTable = tables.find((t) => t.id === selectedTableId);
 
   return (
+    <RealtimeProvider tokenKind="staffToken">
+      <RealtimeListener event="connect" onEvent={() => loadTables().catch(() => {})} />
+      <RealtimeListener event="table_status_changed" onEvent={() => loadTables().catch(() => {})} />
+      <RealtimeListener event="order_created" onEvent={() => loadTables().catch(() => {})} />
+      <RealtimeListener event="checkout_requested" onEvent={() => loadTables().catch(() => {})} />
     <div>
       <h1>
         前台{role === 'manager' ? '（店长/管理员）' : ''}
@@ -175,8 +179,14 @@ export default function FrontDeskPage() {
         <ul>{config?.kdsScreenEnabled && <li>厨房看板（见 /kitchen）</li>}</ul>
       </nav>
 
+      {role === 'manager' && <ReportsPanel />}
+
       {role === 'manager' && config && <ManagementPanel config={config} />}
 
+      {/* 外卖/配送、预定这两个模块的开关暂时从界面上藏起来：产品化阶段默认关闭、按客户定制
+          才打开（见项目记忆 delivery_reservation_modules_off_by_default），不需要在设置页
+          让店长自己看到并意外打开一个还没准备好对外的模块。真要给某个客户开，直接改数据库
+          /调用 PATCH /store-config，不通过这个界面。 */}
       {role === 'manager' && config && (
         <section>
           <h2>门店设置</h2>
@@ -188,24 +198,9 @@ export default function FrontDeskPage() {
             />
             启用厨房电子看板
           </label>
-          <label>
-            <input
-              type="checkbox"
-              checked={config.deliveryEnabled}
-              onChange={(e) => toggleFeature('deliveryEnabled', e.target.checked)}
-            />
-            启用外卖/配送模块
-          </label>
-          <label>
-            <input
-              type="checkbox"
-              checked={config.reservationEnabled}
-              onChange={(e) => toggleFeature('reservationEnabled', e.target.checked)}
-            />
-            启用预定模块
-          </label>
         </section>
       )}
     </div>
+    </RealtimeProvider>
   );
 }

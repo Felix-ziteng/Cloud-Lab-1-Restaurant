@@ -30,6 +30,12 @@ export class ReservationsController {
     return this.reservationsService.cancel(id);
   }
 
+  // 暂不启用：整个控制器都挂在 reservationEnabled 开关下，见 ReservationsService.noShow 的说明
+  @Patch(':id/no-show')
+  noShow(@Param('id') id: string) {
+    return this.reservationsService.noShow(id);
+  }
+
   @Post(':id/arrive')
   arrive(@Param('id') id: string, @Body() dto: ArriveReservationDto, @CurrentAuth() auth: AuthPayload) {
     if (auth.type !== 'staff') throw new ForbiddenException('仅店员可操作到店开台');

@@ -1,12 +1,17 @@
 import { BadRequestException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
+import { JwtService } from '@nestjs/jwt';
+import { randomUUID } from 'crypto';
 import { PrismaService } from '../prisma/prisma.service';
 import { RealtimeGateway } from '../realtime/realtime.gateway';
 import { TablesService } from '../tables/tables.service';
 import { StoreConfigService } from '../store-config/store-config.service';
+import { parseDayBoundary } from '../common/date-range.util';
 import { CreateOrderDto } from './dto/create-order.dto';
 import { AddOrderItemsDto } from './dto/add-order-items.dto';
 import { RecordPaymentDto } from './dto/record-payment.dto';
 import { PriceAdjustmentDto } from './dto/price-adjustment.dto';
+
+type OrderActor = { type: 'staff'; staffId: string } | { type: 'customer' };
 
 @Injectable()
 export class OrdersService {
@@ -15,25 +20,32 @@ export class OrdersService {
     private readonly realtime: RealtimeGateway,
     private readonly tablesService: TablesService,
     private readonly storeConfigService: StoreConfigService,
+    private readonly jwtService: JwtService,
   ) {}
 
-  // V1 暂定：外卖/自提订单由店员在前台代客创建（POS 场景）。
-  // 顾客在店外自助下单外卖/自提，目前还没有对应的身份/令牌模型（见 DATA_MODEL.md 待确认事项），
-  // 是下一阶段需要单独设计的缺口，先不在这里假装实现。
-  async createStandaloneOrder(dto: CreateOrderDto, staffId: string) {
+  // 外卖/自提订单有两条创建路径：店员在前台代客下单（POS 场景），
+  // 或顾客在店外自助下单（见 createGuestOrder）——两条路径共用同一套建单逻辑，
+  // 只是 actor 不同（有没有 staffId、createdByType 是 staff 还是 customer）
+  async createStandaloneOrder(dto: CreateOrderDto, actor: OrderActor) {
     // delivery 专属接口（分配骑手/更新状态等）挂了 deliveryEnabled 开关，
     // 但创建订单本身走的是这个通用入口，得在这里单独补一道，否则开关形同虚设
     if (dto.type === 'delivery' && !(await this.storeConfigService.isEnabled('deliveryEnabled'))) {
       throw new ForbiddenException('该门店未启用外卖配送功能');
     }
+    // 这个入口现在对未登录的顾客开放（见 createGuestOrder），地址不能再指望前端表单一定填了，
+    // 服务端得自己兜底，不然会建出一堆没地址的配送单
+    if (dto.type === 'delivery' && !dto.deliveryAddress?.trim()) {
+      throw new BadRequestException('配送地址不能为空');
+    }
 
     const dishes = await this.prisma.dish.findMany({ where: { id: { in: dto.items.map((i) => i.dishId) } } });
+    const staffId = actor.type === 'staff' ? actor.staffId : undefined;
 
     const order = await this.prisma.$transaction(async (tx) => {
       const created = await tx.order.create({
         data: {
           type: dto.type,
-          createdByType: 'staff',
+          createdByType: actor.type,
           createdByStaffId: staffId,
           customerContact: dto.customerContact,
           pickupTime: dto.pickupTime ? new Date(dto.pickupTime) : undefined,
@@ -51,11 +63,12 @@ export class OrdersService {
         },
       });
 
-      await this.insertItems(tx, created.id, dto.items, dishes, 'staff', staffId);
+      await this.insertItems(tx, created.id, dto.items, dishes, actor.type === 'staff' ? 'staff' : 'customer', staffId);
 
-      // 堂食是"加购物车 -> 手动提交"两步，外卖/自提是店员一次性代客下单，没有"提交"这一步——
-      // 建单本身就该直接推给厨房，不然这里插入的 OrderItem 会一直停在 submittedAt=null，
-      // 厨房看板的查询条件要求 submittedAt 不为空，这些菜会永远不出现在厨房队列里
+      // 堂食是"加购物车 -> 手动提交"两步，外卖/自提（不管是店员代下还是顾客自助）都是
+      // 一次性下单，没有"提交"这一步——建单本身就该直接推给厨房，不然这里插入的 OrderItem
+      // 会一直停在 submittedAt=null，厨房看板的查询条件要求 submittedAt 不为空，
+      // 这些菜会永远不出现在厨房队列里
       await tx.orderItem.updateMany({
         where: { orderId: created.id, submittedAt: null },
         data: { roundNumber: 1, submittedAt: new Date() },
@@ -65,7 +78,30 @@ export class OrdersService {
     });
 
     this.realtime.emitToKitchen('new_order_item', { orderId: order.id, roundNumber: 1 });
+    this.realtime.emitToFrontdesk('order_created', { orderId: order.id, type: order.type });
     return order;
+  }
+
+  // 顾客自助下单：不需要登录，建单成功后签发一个绑定这张单的 guest token（跟堂食桌台令牌
+  // 是同一种 payload 形状，只是没有 tableSessionId），前端存起来后续凭它查看订单状态
+  async createGuestOrder(dto: CreateOrderDto) {
+    const order = await this.createStandaloneOrder(dto, { type: 'customer' });
+    return { orderId: order.id, order, token: this.issueGuestOrderToken(order.id) };
+  }
+
+  // 换设备/清了浏览器缓存导致 token 丢了：用"订单号 + 下单时留的手机号"这个组合找回订单，
+  // 重新签发一个新 token。本地部署没有短信验证码这道关卡，安全性依赖这个组合不容易被撞中——
+  // 泄露的最坏情况是看到配送地址这类信息，跟订单号本身（相当于一个凭证）的敏感度是匹配的
+  async lookupGuestOrder(orderNumber: number, phone: string) {
+    const order = await this.prisma.order.findFirst({
+      where: { orderNumber, customerContact: phone, type: { in: ['takeout', 'delivery'] } },
+    });
+    if (!order) throw new NotFoundException('没有找到匹配的订单，请检查订单号和手机号');
+    return { orderId: order.id, token: this.issueGuestOrderToken(order.id) };
+  }
+
+  private issueGuestOrderToken(orderId: string) {
+    return this.jwtService.sign({ type: 'guest', sub: randomUUID(), tableSessionId: null, orderId });
   }
 
   getById(orderId: string) {
@@ -75,35 +111,28 @@ export class OrdersService {
         items: { where: { isVoided: false }, orderBy: { createdAt: 'asc' } },
         payments: true,
         priceAdjustments: true,
+        deliveryInfo: true,
       },
     });
   }
 
-  // 历史订单查看（精简版）：按时间倒序，可选按状态/类型筛，只给列表摘要信息，
-  // 详情还是走 getById——列表页不用把每单的菜品明细都拉下来
-  list(filters: { status?: string; type?: string; limit?: number }) {
+  // 历史订单查看（精简版）：按时间倒序，可选按状态/类型/日期范围筛，只给列表摘要信息，
+  // 详情还是走 getById——列表页不用把每单的菜品明细都拉下来。
+  // from/to 是经营概览报表"点某天看当天所有订单"这个下钻入口在用（见 ReportsPanel）
+  list(filters: { status?: string; type?: string; limit?: number; from?: string; to?: string }) {
     return this.prisma.order.findMany({
       where: {
         status: filters.status ? (filters.status as never) : undefined,
         type: filters.type ? (filters.type as never) : undefined,
+        createdAt:
+          filters.from && filters.to
+            ? { gte: parseDayBoundary(filters.from, false), lte: parseDayBoundary(filters.to, true) }
+            : undefined,
       },
       orderBy: { createdAt: 'desc' },
       take: filters.limit ?? 50,
       include: {
         tableSession: { include: { tables: { include: { table: true } } } },
-        deliveryInfo: { include: { rider: { select: { id: true, name: true, status: true } } } },
-      },
-    });
-  }
-
-  // 骑手只能看分配给自己的配送单，不走上面那个店员专用的通用列表
-  listForRider(riderId: string) {
-    return this.prisma.order.findMany({
-      where: { deliveryInfo: { riderId } },
-      orderBy: { createdAt: 'desc' },
-      take: 50,
-      include: {
-        items: { where: { isVoided: false } },
         deliveryInfo: true,
       },
     });
@@ -122,6 +151,8 @@ export class OrdersService {
     if (order.tableSessionId) {
       this.realtime.emitToTable(order.tableSessionId, 'item_added', { orderId });
     }
+    this.realtime.emitToOrder(orderId, 'order_updated', { orderId });
+    this.realtime.emitToFrontdesk('order_updated', { orderId });
     return updated;
   }
 
@@ -155,6 +186,8 @@ export class OrdersService {
     if (updated.tableSessionId) {
       this.realtime.emitToTable(updated.tableSessionId, 'item_added', { orderId });
     }
+    this.realtime.emitToOrder(orderId, 'order_updated', { orderId });
+    this.realtime.emitToFrontdesk('order_updated', { orderId });
     return updated;
   }
 
@@ -184,6 +217,8 @@ export class OrdersService {
     if (order.tableSessionId) {
       this.realtime.emitToTable(order.tableSessionId, 'item_added', { orderId, roundNumber: nextRound });
     }
+    this.realtime.emitToOrder(orderId, 'order_updated', { orderId });
+    this.realtime.emitToFrontdesk('order_updated', { orderId });
 
     return { roundNumber: nextRound, itemCount: pendingItems.length };
   }
@@ -195,6 +230,28 @@ export class OrdersService {
     });
     this.realtime.emitToFrontdesk('checkout_requested', { orderId, tableSessionId: order.tableSessionId });
     return order;
+  }
+
+  // 暂不启用：后端能力已实现完整（含权限/状态校验），但前端还没接任何入口去调用它——
+  // 见跟用户的决策记录（2026-08-20），先把代码写完，等确定要不要做成一个正式功能再接 UI。
+  // 已支付的订单不能取消（这个系统没有线上支付，走到"已支付"意味着现金已经收了，
+  // 取消不等于退款，账目会对不上，需要走店内其它流程处理，不是这个接口的职责）
+  async cancelOrder(orderId: string) {
+    const order = await this.prisma.order.findUnique({ where: { id: orderId } });
+    if (!order) throw new NotFoundException('订单不存在');
+    if (order.status === 'paid') throw new BadRequestException('已支付的订单不能取消');
+    if (order.status === 'cancelled') throw new BadRequestException('订单已经是取消状态');
+
+    const updated = await this.prisma.order.update({ where: { id: orderId }, data: { status: 'cancelled' } });
+
+    if (order.tableSessionId) {
+      await this.tablesService.closeSession(order.tableSessionId);
+      this.realtime.emitToTable(order.tableSessionId, 'order_cancelled', { orderId });
+    }
+    this.realtime.emitToOrder(orderId, 'order_updated', { orderId });
+    this.realtime.emitToFrontdesk('order_updated', { orderId });
+
+    return updated;
   }
 
   async recordPayment(orderId: string, dto: RecordPaymentDto, staffId: string) {
@@ -218,7 +275,19 @@ export class OrdersService {
       await this.tablesService.closeSession(order.tableSessionId);
       this.realtime.emitToTable(order.tableSessionId, 'order_paid', { orderId });
     }
+    this.realtime.emitToOrder(orderId, 'order_updated', { orderId });
 
+    // 外卖单没有走骑手自助确认收款那条路（已经删掉了），店员用这个通用收款接口记账时，
+    // 顺带把配送状态同步成"已送达"——不然订单显示已支付，配送状态却停在"配送中"不动，对不上
+    if (order.type === 'delivery') {
+      await this.prisma.deliveryInfo.updateMany({
+        where: { orderId },
+        data: { status: 'delivered', paymentConfirmed: true, confirmedAt: new Date() },
+      });
+      this.realtime.emitToFrontdesk('delivery_status_changed', { orderId, status: 'delivered' });
+    }
+
+    this.realtime.emitToFrontdesk('order_updated', { orderId });
     return updatedOrder;
   }
 
@@ -246,7 +315,10 @@ export class OrdersService {
       await this.prisma.orderItem.update({ where: { id: dto.orderItemId }, data: { isVoided: true } });
     }
 
-    return this.recalculateTotals(orderId, this.prisma);
+    const updated = await this.recalculateTotals(orderId, this.prisma);
+    this.realtime.emitToOrder(orderId, 'order_updated', { orderId });
+    this.realtime.emitToFrontdesk('order_updated', { orderId });
+    return updated;
   }
 
   private async insertItems(

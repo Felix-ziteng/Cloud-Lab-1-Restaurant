@@ -21,9 +21,16 @@ const KITCHEN_STATUS_LABEL: Record<string, string> = {
   done: '已完成',
 };
 
+interface Props {
+  // 传了 from/to 就是从经营概览报表某一天下钻进来的，只看那一天的订单
+  // （不传就是默认的"翻全部历史订单"模式，行为跟之前一样）
+  from?: string;
+  to?: string;
+}
+
 // 历史订单查看（精简版）：列表 + 只读详情，不带任何编辑操作——要改单还是回桌台看板那边走
 // OrderDetailPanel。这里纯粹是"翻回去看某一单当时点了什么、收了多少钱"。
-export default function OrderHistoryPanel() {
+export default function OrderHistoryPanel({ from, to }: Props) {
   const [orders, setOrders] = useState<OrderListItem[]>([]);
   const [statusFilter, setStatusFilter] = useState('');
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -31,12 +38,19 @@ export default function OrderHistoryPanel() {
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    const query = statusFilter ? `?status=${statusFilter}` : '';
+    const params = new URLSearchParams();
+    if (statusFilter) params.set('status', statusFilter);
+    if (from && to) {
+      params.set('from', from);
+      params.set('to', to);
+      params.set('limit', '200'); // 下钻看某一天的单，默认 50 条可能不够，放宽一点
+    }
+    const query = params.toString() ? `?${params.toString()}` : '';
     api
       .get<OrderListItem[]>(`/orders${query}`, 'staffToken')
       .then(setOrders)
       .catch((err) => setError(err instanceof Error ? err.message : '加载失败'));
-  }, [statusFilter]);
+  }, [statusFilter, from, to]);
 
   useEffect(() => {
     if (!selectedId) {
@@ -56,7 +70,7 @@ export default function OrderHistoryPanel() {
 
   return (
     <section>
-      <h2>历史订单</h2>
+      <h2>{from && to ? `${from} 订单明细` : '历史订单'}</h2>
       {error && <p style={{ color: 'red' }}>操作失败：{error}</p>}
 
       <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)}>

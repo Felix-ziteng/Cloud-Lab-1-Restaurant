@@ -1,0 +1,32 @@
+:80 {
+	# 只放行外卖/自提/堂食顾客点餐要用到的接口，白名单之外一律不转发给后端——
+	# 店员登录、桌台管理、厨房看板、收款、改价这些接口完全不在这张白名单里，
+	# 就算隧道的公网地址被人拿到，也碰不到这些接口（真正的权限校验仍然在后端做，
+	# 这层白名单只是缩小暴露面，不是唯一防线）。
+	@guest path /api/menu /api/store-config /api/orders/guest /api/orders/lookup /api/table-sessions/*/join /api/orders/*/items /api/orders/*/submit /api/orders/*/checkout-request
+	@guestOrderDetail path_regexp ^/api/orders/[0-9a-fA-F-]+$
+	@socket path /socket.io/*
+
+	handle @guest {
+		reverse_proxy host.docker.internal:3000
+	}
+	handle @guestOrderDetail {
+		reverse_proxy host.docker.internal:3000
+	}
+	handle @socket {
+		reverse_proxy host.docker.internal:3000
+	}
+
+	# 白名单之外的 /api/* 请求明确 404，而不是掉进下面的 SPA 兜底逻辑悄悄返回一堆 HTML——
+	# 那样看起来像是"请求成功了"，调试的时候容易被这个假 200 搞糊涂
+	handle /api/* {
+		respond 404
+	}
+
+	# 其余请求交给前端静态文件（顾客点餐的几个页面 + 堂食点餐页），SPA 路由用 try_files 兜底
+	handle {
+		root * /srv/frontend
+		try_files {path} /index.html
+		file_server
+	}
+}

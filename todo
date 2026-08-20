@@ -1,0 +1,22 @@
+需要尽快处理
+JWT_SECRET 和数据库密码还是开发默认值 — .env 里 JWT_SECRET="change-me"，docker-compose.yml 里 Postgres 密码是 postgres。这套系统现在部分接口已经暴露到公网（外卖/自提隧道），生产上线前必须换成真实的随机密钥，不然 JWT 等于没签名保护。
+
+店员 PIN 不做唯一性校验，登录逻辑会认错人 — staff.service.ts 的 create()/resetPin() 从不检查新 PIN 是否和其他在职店员冲突；登录时 findPinMatch() 是线性扫描、命中第一个匹配就返回。如果两个店员的 PIN 恰好一样（或店长重置时不小心撞上别人的），后登录的那个人会被系统认成前一个人的身份——PriceAdjustment 的审计追责、"谁收的款"这些记录会全部记错人。这是个真实存在的正确性/安全 bug，不是边缘情况。
+
+自动化测试几乎为零 — 只有 table-sessions.e2e-spec.ts 3 个测试，覆盖一个并发开台场景。价格计算（recalculateTotals、price_override、折扣/赠菜/作废的叠加规则）、报表统计口径、guest 下单流程、各种权限 guard，这些直接关系到"钱算得对不对"的核心逻辑，没有任何回归保护——以后改代码很容易在自己没发现的地方把账算错。
+
+功能缺口
+菜品/分类/桌台没有"编辑"入口 — 后端 PUT /dishes/:id、PUT /categories/:id、PUT /tables/:id 都实现了，但前端 ManagementPanel 只接了新增/删除/上下架，改个菜价得删了重建，桌台改容量同理。
+Order.status = 'cancelled' 定义了但从没被用过 — 找不到任何代码路径能把一个订单标成"已取消"。顾客下的外卖单想取消，系统里没有对应操作。
+Reservation.status = 'no_show' 同样是个死值 — 只有取消（cancel）和到店（arrive），没有"顾客没来"这个操作。
+文档和代码不同步
+四份 docs（PRD/ARCHITECTURE/DATA_MODEL/API_DESIGN）都还在描述"骑手账号体系"，但这个功能已经按你的要求整体拆掉了，文档没跟着改。
+kitchen_station 站点级令牌从来没真正实现过，KDS 一直是借用店员 PIN 登录顶着——这个文档自己承认，但一直没排期解决。
+小票打印机集成（ARCHITECTURE 2.6/2.7 提到的"打印代理"）完全没做，文档写的是"没有实体打印机可联调，等硬件到位"。
+DATA_MODEL.md 里"新发现的缺口"（外卖自助下单身份模型）、"报表统计口径待设计"这两条都已经解决了，文档没更新；API_DESIGN.md 的 WebSocket 房间表和 REST 端点列表也是旧版本，缺了这几轮新加的 order:{orderId} 房间、/orders/guest、/orders/lookup、/reports/overview。
+外卖/自提公网暴露这个架构决策（Caddy 白名单 + Cloudflare Tunnel）完全没写进 ARCHITECTURE.md——这是一个真实做出的、有安全含义的架构决策，理应记录在案。
+部署/运维
+没有生产环境的启动方式 — 现在跑起来的都是 npm run start:dev/npm run dev 这类开发热更新进程，mini PC 断电重启后不会自动拉起来，也没有配 PM2/Windows 服务这类进程守护。
+数据库零备份策略 — ARCHITECTURE.md 自己也把这条列为待办，一直没做。
+较低优先级
+/orders/guest、/orders/lookup 现在是公网可直接访问的接口，没有任何限流——之前讨论限流是针对店员登录（不打算公开），但这两个接口是特意公开的，没限流的话有被刷单/滥用的风险，值得重新评估。

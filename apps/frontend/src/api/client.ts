@@ -3,9 +3,16 @@
 
 const BASE_URL = import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:3000/api';
 
+// Socket.IO 网关没有挂在 Nest 的全局前缀（app.setGlobalPrefix('api') 只影响 HTTP 控制器），
+// 所以连接地址是去掉 /api 后缀的域名根路径，不能直接复用 BASE_URL。
+// 生产构建（给 Caddy/隧道用，见 .env.production）用的是相对路径 '/api'，
+// 去掉后缀后剩空字符串——这种情况下传 undefined 给 socket.io-client，
+// 让它按"当前页面同源"连接，而不是指望空字符串被正确解析成 URL
+export const SOCKET_URL = BASE_URL.replace(/\/api\/?$/, '') || undefined;
+
 // 'guest:{tableId}' 这种带参数的 key 也合法：桌台会话令牌必须按桌台区分存储，
 // 不能用一个全局的 'guestToken'，否则扫了 A 桌又扫 B 桌会复用 A 桌的令牌（token 里的 orderId 对不上）
-export type TokenKind = 'staffToken' | 'riderToken' | (string & {});
+export type TokenKind = 'staffToken' | (string & {});
 
 const AUTH_INVALIDATED_EVENT = 'auth-invalidated';
 

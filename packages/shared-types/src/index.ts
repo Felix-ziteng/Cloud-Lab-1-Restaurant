@@ -40,6 +40,8 @@ export type OrderStatus = "open" | "awaiting_payment" | "paid" | "cancelled";
 // 前端要展示/计算时自己 Number(...) 转换，不要信 TS 的 number 直觉
 export interface Order {
   id: string;
+  // 顾客自助下单外卖/自提用"订单号 + 手机号"找回订单（UUID 主键不适合手打），见 lookupGuestOrder
+  orderNumber: number;
   type: OrderType;
   tableSessionId: string | null;
   status: OrderStatus;
@@ -104,24 +106,13 @@ export interface StaffAccount {
   status: AccountStatus;
 }
 
-export interface Rider {
-  id: string;
-  name: string;
-  status: AccountStatus;
-}
-
-export type DeliveryStatus =
-  | "unassigned"
-  | "assigned"
-  | "picked_up"
-  | "delivering"
-  | "delivered";
+// 骑手模块暂时删除：店家自己配送，配送状态只是个简单字段，不挂账号体系。
+export type DeliveryStatus = "unassigned" | "delivering" | "delivered";
 
 export interface DeliveryInfo {
   orderId: string;
   address: string;
   contactPhone: string;
-  riderId: string | null;
   status: DeliveryStatus;
   codAmount: string;
   paymentConfirmed: boolean;
@@ -135,9 +126,8 @@ export interface Payment {
   orderId: string;
   method: PaymentMethod;
   amount: string;
-  collectedByType: "staff" | "rider";
+  collectedByType: "staff";
   collectedByStaffId: string | null;
-  collectedByRiderId: string | null;
   collectedAt: string;
 }
 
@@ -187,6 +177,18 @@ export interface OrderDetail extends Order {
   items: OrderItem[];
   payments: Payment[];
   priceAdjustments: PriceAdjustment[];
+  deliveryInfo: DeliveryInfo | null;
+}
+
+// GET /api/orders/lookup 的响应：顾客找回订单后拿到的新凭证
+export interface GuestOrderToken {
+  orderId: string;
+  token: string;
+}
+
+// POST /api/orders/guest 的响应：顾客自助下单成功后拿到的凭证 + 订单摘要
+export interface GuestOrderCreated extends GuestOrderToken {
+  order: Order;
 }
 
 // GET /api/order-items/queue
@@ -206,13 +208,16 @@ export interface OrderListItem extends Order {
   tableSession: {
     tables: { table: Pick<Table, "id" | "tableNumber"> }[];
   } | null;
-  deliveryInfo:
-    | (DeliveryInfo & { rider: Pick<Rider, "id" | "name" | "status"> | null })
-    | null;
+  deliveryInfo: DeliveryInfo | null;
 }
 
-// GET /api/orders（骑手视角：只看分配给自己的配送单，带菜品明细，不带 tableSession）
-export interface RiderOrder extends Order {
-  items: OrderItem[];
-  deliveryInfo: DeliveryInfo | null;
+// GET /api/reports/overview（店长经营概览，仅 manager 可看）
+export interface ReportOverview {
+  from: string;
+  to: string;
+  revenue: { total: number; byType: Record<OrderType, number> };
+  orderCount: { total: number; byType: Record<OrderType, number> };
+  // 堂食翻台率：这段时间内完成的桌台会话数 / (桌台数 * 天数)
+  tableTurnoverRate: number;
+  dailyBreakdown: { date: string; revenue: number; orderCount: number }[];
 }

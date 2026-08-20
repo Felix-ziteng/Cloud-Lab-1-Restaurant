@@ -11,10 +11,13 @@ datasource db {
 // 门店能力配置：单店部署下是单行"单例"（固定 id = 1），决定这份部署要不要暴露
 // 厨房看板 / 外卖 / 预定这些可选模块。见 docs/ARCHITECTURE.md 关于产品化配置的决策。
 model StoreConfig {
-  id                 Int      @id @default(1)
-  kdsScreenEnabled   Boolean  @default(true)
-  deliveryEnabled    Boolean  @default(true)
-  reservationEnabled Boolean  @default(true)
+  id               Int     @id @default(1)
+  kdsScreenEnabled Boolean @default(true)
+  // 外卖/自提自助下单和预定这两个模块默认关闭：前者需要暴露到公网（见 ops/Caddyfile），
+  // 后者也是"按客户定制"的可选模块，产品化阶段默认不为每个部署打开，只有客户明确需要时
+  // 才单独为那家店的部署打开——见跟用户的决策记录（2026-08-20）
+  deliveryEnabled    Boolean  @default(false)
+  reservationEnabled Boolean  @default(false)
   updatedAt          DateTime @updatedAt
 
   @@map("store_config")
@@ -142,6 +145,9 @@ model TableSessionTable {
 
 model Order {
   id                String        @id @default(uuid())
+  // 顾客自助下单外卖/自提没有账号体系，靠"订单号 + 手机号"找回订单状态（见 OrdersService.lookupGuestOrder），
+  // UUID 主键不适合让顾客手打，所以另开一个人类可读的顺序号
+  orderNumber       Int           @unique @default(autoincrement())
   type              OrderType
   tableSessionId    String?       @unique
   tableSession      TableSession? @relation(fields: [tableSessionId], references: [id])

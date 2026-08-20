@@ -1,35 +1,33 @@
 import { useEffect, useState, type FormEvent } from 'react';
-import type { MenuCategory, OrderListItem, Rider } from '@restaurant/shared-types';
+import type { MenuCategory, OrderListItem } from '@restaurant/shared-types';
 import { api } from '../api/client';
+import { useRealtimeEvent } from '../realtime/RealtimeContext';
 
 const DELIVERY_STATUS_LABEL: Record<string, string> = {
-  unassigned: '未分配',
-  assigned: '已分配',
-  picked_up: '已取货',
+  unassigned: '未出发',
   delivering: '配送中',
   delivered: '已送达',
 };
 
-// 外卖/配送管理（精简版）：建单、看列表、分配骑手。骑手那边的取货/送达/收款
-// 走单独的骑手端页面（/rider），不在这里操作——店员和骑手是两个不同的物理设备。
+// 外卖/配送管理（精简版）：店家自己送，没有骑手账号体系，配送状态和收款都由店员在前台直接记录。
 export default function DeliveryPanel() {
   const [orders, setOrders] = useState<OrderListItem[]>([]);
-  const [riders, setRiders] = useState<Rider[]>([]);
   const [menu, setMenu] = useState<MenuCategory[]>([]);
   const [cart, setCart] = useState<Record<string, number>>({});
   const [form, setForm] = useState({ customerContact: '', deliveryAddress: '' });
   const [error, setError] = useState<string | null>(null);
 
   const load = () => api.get<OrderListItem[]>('/orders?type=delivery', 'staffToken').then(setOrders).catch(() => {});
-  const loadRiders = () => api.get<Rider[]>('/riders', 'staffToken').then(setRiders).catch(() => {});
 
   useEffect(() => {
     load();
-    loadRiders();
     api.get<MenuCategory[]>('/menu').then(setMenu).catch(() => {});
-    const timer = setInterval(load, 10000);
-    return () => clearInterval(timer);
   }, []);
+
+  useRealtimeEvent('connect', () => load());
+  useRealtimeEvent('order_created', () => load());
+  useRealtimeEvent('order_updated', () => load());
+  useRealtimeEvent('delivery_status_changed', () => load());
 
   async function run(action: () => Promise<void>) {
     setError(null);
@@ -65,17 +63,14 @@ export default function DeliveryPanel() {
     });
   }
 
-  async function assignRider(orderId: string) {
-    const activeRiders = riders.filter((r) => r.status === 'active');
-    if (activeRiders.length === 0) {
-      setError('没有在职骑手可以分配');
-      return;
-    }
-    const options = activeRiders.map((r) => r.name).join('、');
-    const picked = window.prompt(`分配给哪个骑手？可选：${options}`, activeRiders[0].name);
-    const rider = activeRiders.find((r) => r.name === picked);
-    if (!rider) return;
-    await run(() => api.post(`/orders/${orderId}/delivery/assign`, { riderId: rider.id }, 'staffToken'));
+  async function markDeparted(orderId: string) {
+    await run(() => api.patch(`/orders/${orderId}/delivery/status`, { status: 'delivering' }, 'staffToken'));
+  }
+
+  async function recordPayment(orderId: string, total: string) {
+    const amount = Number(window.prompt('实收金额？', total));
+    if (!amount || amount < 0) return;
+    await run(() => api.post(`/orders/${orderId}/payments`, { method: 'cash', amount }, 'staffToken'));
   }
 
   return (
@@ -87,11 +82,12 @@ export default function DeliveryPanel() {
         {orders.map((order) => (
           <li key={order.id}>
             {new Date(order.createdAt).toLocaleString()} · {order.customerContact} · {order.deliveryInfo?.address} · ¥
-            {Number(order.total).toFixed(2)} · {order.deliveryInfo ? DELIVERY_STATUS_LABEL[order.deliveryInfo.status] : ''}
-            {order.deliveryInfo?.rider ? ` · 骑手：${order.deliveryInfo.rider.name}` : ' · 未分配骑手'}
+            {Number(order.total).toFixed(2)} · {order.deliveryInfo ? DELIVERY_STATUS_LABEL[order.deliveryInfo.status] : ''} ·{' '}
+            {order.status === 'paid' ? '已收款' : '未收款'}
             {(!order.deliveryInfo || order.deliveryInfo.status === 'unassigned') && (
-              <button onClick={() => assignRider(order.id)}>分配骑手</button>
+              <button onClick={() => markDeparted(order.id)}>标记已出发</button>
             )}
+            {order.status !== 'paid' && <button onClick={() => recordPayment(order.id, order.total)}>记录收款</button>}
           </li>
         ))}
         {orders.length === 0 && <li>暂无外卖订单</li>}

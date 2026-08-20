@@ -11,5 +11,19 @@ services:
     volumes:
       - postgres_data:/var/lib/postgresql/data
 
+  # 外卖/自提顾客自助下单要从公网访问，但前台/厨房/收银这些接口不应该跟着一起暴露出去——
+  # 这个反向代理只放行 ops/Caddyfile 里白名单的那几条接口 + 前端静态文件，
+  # 是内网穿透隧道（cloudflared）真正指向的目标，不是给店员/厨房用的入口
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    ports:
+      - "8080:80"
+    volumes:
+      - ./ops/Caddyfile:/etc/caddy/Caddyfile:ro
+      - ./apps/frontend/dist:/srv/frontend:ro
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
 volumes:
   postgres_data:

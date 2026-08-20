@@ -1,6 +1,7 @@
 import { useEffect, useState, type FormEvent } from 'react';
 import type { Reservation, TableWithSession } from '@restaurant/shared-types';
 import { api } from '../api/client';
+import { useRealtimeEvent } from '../realtime/RealtimeContext';
 
 const STATUS_LABEL: Record<string, string> = {
   pending: '待到店',
@@ -25,9 +26,17 @@ export default function ReservationsPanel() {
   useEffect(() => {
     load();
     loadTables();
-    const timer = setInterval(load, 30000);
+    // 数据变化已经靠 WebSocket 推送了，这个定时器只是为了让"临近提醒"那条高亮逻辑
+    // （纯前端按 Date.now() 算的）能定期重新算一遍，不然数据没变时页面不会自己重渲染
+    const timer = setInterval(load, 60000);
     return () => clearInterval(timer);
   }, []);
+
+  useRealtimeEvent('connect', () => {
+    load();
+    loadTables();
+  });
+  useRealtimeEvent('reservation_changed', () => load());
 
   async function run(action: () => Promise<void>) {
     setError(null);

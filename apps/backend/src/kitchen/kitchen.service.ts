@@ -38,6 +38,8 @@ export class KitchenService {
     if (item.order.tableSessionId) {
       this.realtime.emitToTable(item.order.tableSessionId, 'item_status_changed', { orderItemId, status });
     }
+    this.realtime.emitToOrder(item.order.id, 'order_updated', { orderId: item.order.id });
+    this.realtime.emitToFrontdesk('order_updated', { orderId: item.order.id });
     return item;
   }
 }

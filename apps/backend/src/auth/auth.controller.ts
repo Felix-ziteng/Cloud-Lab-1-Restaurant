@@ -10,9 +10,4 @@ export class AuthController {
   staffLogin(@Body() dto: LoginDto) {
     return this.authService.staffLogin(dto.pin);
   }
-
-  @Post('rider/login')
-  riderLogin(@Body() dto: LoginDto) {
-    return this.authService.riderLogin(dto.pin);
-  }
 }

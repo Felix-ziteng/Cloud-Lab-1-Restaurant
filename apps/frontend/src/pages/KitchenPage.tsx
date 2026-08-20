@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState, type FormEvent } from 'react';
 import type { KitchenQueueItem } from '@restaurant/shared-types';
 import { api, getToken, setToken, clearToken, onAuthInvalidated } from '../api/client';
+import { RealtimeProvider, RealtimeListener } from '../realtime/RealtimeContext';
 
 // 厨房 KDS 看板：设计上是站点级访问、无个人登录（见 API_DESIGN.md 第 2 节），
 // 但站点级令牌的签发流程还没做（见 auth.types.ts），MVP 阶段先借用店员 PIN 登录顶上
@@ -34,8 +35,6 @@ export default function KitchenPage() {
   useEffect(() => {
     if (!loggedIn) return;
     loadQueue().catch(() => {});
-    const timer = setInterval(() => loadQueue().catch(() => {}), 3000);
-    return () => clearInterval(timer);
   }, [loggedIn, loadQueue]);
 
   async function handleLogin(e: FormEvent) {
@@ -82,25 +81,30 @@ export default function KitchenPage() {
   }
 
   return (
-    <div>
-      <h1>
-        厨房看板
-        <button onClick={logout}>退出登录</button>
-      </h1>
-      {error && <p style={{ color: 'red' }}>操作失败：{error}</p>}
-      <ul>
-        {queue.map((item) => (
-          <li key={item.id}>
-            [{tableLabel(item)}] {item.dishNameSnapshot} x{item.quantity}
-            {item.notes && `（${item.notes}）`} — {item.kitchenStatus === 'pending' ? '待处理' : '制作中'}
-            {item.kitchenStatus === 'pending' && (
-              <button onClick={() => markStatus(item.id, 'preparing')}>开始制作</button>
-            )}
-            <button onClick={() => markStatus(item.id, 'done')}>完成</button>
-          </li>
-        ))}
-        {queue.length === 0 && <li>暂无待处理订单</li>}
-      </ul>
-    </div>
+    <RealtimeProvider tokenKind="staffToken">
+      <RealtimeListener event="connect" onEvent={() => loadQueue().catch(() => {})} />
+      <RealtimeListener event="new_order_item" onEvent={() => loadQueue().catch(() => {})} />
+      <RealtimeListener event="item_status_changed" onEvent={() => loadQueue().catch(() => {})} />
+      <div>
+        <h1>
+          厨房看板
+          <button onClick={logout}>退出登录</button>
+        </h1>
+        {error && <p style={{ color: 'red' }}>操作失败：{error}</p>}
+        <ul>
+          {queue.map((item) => (
+            <li key={item.id}>
+              [{tableLabel(item)}] {item.dishNameSnapshot} x{item.quantity}
+              {item.notes && `（${item.notes}）`} — {item.kitchenStatus === 'pending' ? '待处理' : '制作中'}
+              {item.kitchenStatus === 'pending' && (
+                <button onClick={() => markStatus(item.id, 'preparing')}>开始制作</button>
+              )}
+              <button onClick={() => markStatus(item.id, 'done')}>完成</button>
+            </li>
+          ))}
+          {queue.length === 0 && <li>暂无待处理订单</li>}
+        </ul>
+      </div>
+    </RealtimeProvider>
   );
 }

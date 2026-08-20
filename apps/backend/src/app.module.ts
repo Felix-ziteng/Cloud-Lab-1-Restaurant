@@ -13,7 +13,7 @@ import { DeliveryModule } from './delivery/delivery.module';
 import { ReservationsModule } from './reservations/reservations.module';
 import { StoreConfigModule } from './store-config/store-config.module';
 import { StaffModule } from './staff/staff.module';
-import { RidersModule } from './riders/riders.module';
+import { ReportsModule } from './reports/reports.module';
 
 @Module({
   imports: [
@@ -29,7 +29,7 @@ import { RidersModule } from './riders/riders.module';
     DeliveryModule,
     ReservationsModule,
     StaffModule,
-    RidersModule,
+    ReportsModule,
   ],
   controllers: [AppController],
   providers: [AppService],

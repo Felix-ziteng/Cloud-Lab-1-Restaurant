@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { useParams } from 'react-router-dom';
 import type { MenuCategory, OrderDetail } from '@restaurant/shared-types';
 import { api, setToken } from '../api/client';
+import { RealtimeProvider, RealtimeListener } from '../realtime/RealtimeContext';
 
 // 顾客扫码 / 桌台平板共用的点餐页（见 ARCHITECTURE.md 2.4：两者是同一套代码、同一权限）
 export default function GuestOrderPage() {
@@ -108,10 +109,17 @@ export default function GuestOrderPage() {
   };
 
   return (
+    <RealtimeProvider tokenKind={tokenKind}>
+      <RealtimeListener event="connect" onEvent={() => orderId && refreshOrder(orderId).catch(() => {})} />
+      <RealtimeListener event="item_status_changed" onEvent={() => orderId && refreshOrder(orderId).catch(() => {})} />
+      <RealtimeListener event="item_added" onEvent={() => orderId && refreshOrder(orderId).catch(() => {})} />
+      <RealtimeListener event="order_paid" onEvent={() => orderId && refreshOrder(orderId).catch(() => {})} />
+      <RealtimeListener event="order_cancelled" onEvent={() => orderId && refreshOrder(orderId).catch(() => {})} />
     <div>
       <h1>桌台 {tableId}</h1>
 
       {order.status === 'awaiting_payment' && <p>已发起结账，请等待店员到桌结账</p>}
+      {order.status === 'cancelled' && <p>该订单已被店员取消</p>}
 
       <section>
         <h2>菜单</h2>
@@ -163,5 +171,6 @@ export default function GuestOrderPage() {
         </button>
       )}
     </div>
+    </RealtimeProvider>
   );
 }

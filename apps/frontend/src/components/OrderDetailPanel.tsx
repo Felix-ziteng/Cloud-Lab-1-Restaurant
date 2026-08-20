@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import type { MenuCategory, OrderDetail, TableWithSession } from '@restaurant/shared-types';
 import { api } from '../api/client';
+import { useRealtimeEvent } from '../realtime/RealtimeContext';
 
 const KITCHEN_STATUS_LABEL: Record<string, string> = {
   pending: '待处理',
@@ -35,6 +36,11 @@ export default function OrderDetailPanel({ table, allTables, isManager, onChange
     load().catch(() => {});
     api.get<MenuCategory[]>('/menu').then(setMenu).catch(() => {});
   }, [load]);
+
+  // 别的终端（比如厨房把菜标记完成、店长改价）改了这张单，这里跟着刷新，不用手动点一下才看到
+  useRealtimeEvent('order_updated', (payload) => {
+    if ((payload as { orderId?: string })?.orderId === orderId) load().catch(() => {});
+  });
 
   async function run(action: () => Promise<void>) {
     setError(null);

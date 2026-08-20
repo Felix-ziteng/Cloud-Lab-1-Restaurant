@@ -25,18 +25,6 @@ export class AuthService {
     return { token, role: matched.role };
   }
 
-  async riderLogin(pin: string) {
-    const candidates = await this.prisma.rider.findMany({ where: { status: 'active' } });
-    const matched = await this.findPinMatch(candidates, pin);
-
-    if (!matched) {
-      throw new UnauthorizedException('PIN 码不正确');
-    }
-
-    const token = this.jwtService.sign({ type: 'rider', sub: matched.id });
-    return { token };
-  }
-
   private async findPinMatch<T extends { pinHash: string }>(
     candidates: T[],
     pin: string,
