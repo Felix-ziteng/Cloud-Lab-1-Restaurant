@@ -150,6 +150,8 @@ export default function FrontDeskLayout() {
             {config?.kdsScreenEnabled && (
               <a
                 href="/kitchen"
+                target="_blank"
+                rel="noopener noreferrer"
                 className="rounded-md px-3 py-2 text-sm text-muted-foreground transition-colors hover:bg-secondary hover:text-secondary-foreground"
               >
                 厨房看板 ↗
