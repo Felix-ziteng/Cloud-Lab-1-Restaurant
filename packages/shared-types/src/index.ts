@@ -3,12 +3,16 @@
 
 // 门店能力配置：决定这份部署要不要暴露厨房看板 / 外卖 / 预定这些可选模块
 export type UiTheme = "modern" | "warm";
+export type TabletMenuLayout = "compact" | "browse";
 
 export interface StoreConfig {
   kdsScreenEnabled: boolean;
   deliveryEnabled: boolean;
   reservationEnabled: boolean;
   uiTheme: UiTheme;
+  // 桌台平板开台密码只存哈希，GET /store-config 这个公开接口不会把它吐出来，
+  // 前端永远看不到这个字段——不要以为漏写了，是后端故意排除的
+  tabletMenuLayout: TabletMenuLayout;
 }
 
 export type TableStatus = "idle" | "occupied" | "pending_clear";

@@ -1,14 +1,20 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useParams } from 'react-router-dom';
-import type { MenuCategory, OrderDetail } from '@restaurant/shared-types';
 import { api, setToken } from '../api/client';
 import { RealtimeProvider, RealtimeListener } from '../realtime/RealtimeContext';
+import { useTableOrder } from '../hooks/useTableOrder';
 import { Badge } from '@/components/ui/badge';
 
 const STATUS_BADGE_CLASS: Record<string, string> = {
   pending: 'bg-status-pending text-status-pending-foreground',
   preparing: 'bg-status-preparing text-status-preparing-foreground',
   done: 'bg-status-done text-status-done-foreground',
+};
+
+const KITCHEN_STATUS_LABEL: Record<string, string> = {
+  pending: '待处理',
+  preparing: '制作中',
+  done: '已完成',
 };
 
 // 图片占位图标：菜品还没有真实图片素材时的通用占位，不用 emoji
@@ -36,35 +42,26 @@ function ImagePlaceholderIcon() {
 // 见 design 稿）——这一页用自己专属的字体/配色（index.html 里的 Baloo 2 + Nunito Sans，
 // 以及这里直接写死的 oklch 值），不跟 index.css 里门店级的 modern/warm 主题 token 走同一套，
 // 因为这套视觉是专门给顾客点餐页选的固定方向，不是要新增第三个可切换的门店主题
+//
+// 这里只管"扫码怎么拿到 orderId/token"，拿到之后菜单/购物车/下单这些逻辑都在
+// useTableOrder 里——桌台平板的点餐视图（TabletOrderingCompact/Browse）是另一种
+// "怎么拿到 orderId" 的方式（选桌+密码），共用同一个 hook
 export default function GuestOrderPage() {
   const { tableId } = useParams<{ tableId: string }>();
   const tokenKind = `guest:${tableId}`;
 
   const [orderId, setOrderId] = useState<string | null>(null);
   const [tableNumber, setTableNumber] = useState<string | null>(null);
-  const [menu, setMenu] = useState<MenuCategory[]>([]);
-  const [activeCategoryId, setActiveCategoryId] = useState<string | null>(null);
-  const [order, setOrder] = useState<OrderDetail | null>(null);
-  const [cart, setCart] = useState<Record<string, number>>({});
-  const [error, setError] = useState<string | null>(null);
-  const [busy, setBusy] = useState(false);
+  const [joinError, setJoinError] = useState<string | null>(null);
   // StrictMode 开发模式下同一个 effect 会故意触发两次；join 不是纯读操作（会在桌台空闲时建会话），
   // 这个 ref 保证一次页面访问只真正 join 一次，不产生两个 token 互相覆盖 localStorage 的问题
   const joinedRef = useRef(false);
-
-  const refreshOrder = useCallback(
-    async (id: string) => {
-      const detail = await api.get<OrderDetail>(`/orders/${id}`, tokenKind);
-      setOrder(detail);
-    },
-    [tokenKind],
-  );
 
   useEffect(() => {
     if (!tableId || joinedRef.current) return;
     joinedRef.current = true;
 
-    async function joinAndLoad() {
+    async function join() {
       try {
         const joinRes = await api.post<{ sessionToken: string; orderId: string; tableNumber: string }>(
           `/table-sessions/${tableId}/join`,
@@ -73,66 +70,28 @@ export default function GuestOrderPage() {
         setToken(tokenKind, joinRes.sessionToken);
         setOrderId(joinRes.orderId);
         setTableNumber(joinRes.tableNumber);
-
-        const categories = await api.get<MenuCategory[]>('/menu');
-        setMenu(categories);
-        setActiveCategoryId(categories[0]?.id ?? null);
-        await refreshOrder(joinRes.orderId);
       } catch (err) {
         if (err instanceof Error && err.message.includes('table_pending_clear')) {
-          setError('请稍等，服务员正在清台');
+          setJoinError('请稍等，服务员正在清台');
         } else {
-          setError('加载失败，请稍后重试');
+          setJoinError('加载失败，请稍后重试');
         }
       }
     }
 
-    joinAndLoad();
+    join();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tableId]);
 
-  function addToCart(dishId: string, delta: number) {
-    setCart((prev) => {
-      const next = Math.max(0, (prev[dishId] ?? 0) + delta);
-      const updated = { ...prev, [dishId]: next };
-      if (next === 0) delete updated[dishId];
-      return updated;
-    });
-  }
+  const { menu, activeCategory, setActiveCategoryId, order, cart, addToCart, submitCart, requestCheckout, cartTotal, error, busy, refreshOrder } =
+    useTableOrder({ orderId, tokenKind });
 
-  async function submitCart() {
-    if (!orderId || Object.keys(cart).length === 0) return;
-    setBusy(true);
-    try {
-      const items = Object.entries(cart).map(([dishId, quantity]) => ({ dishId, quantity }));
-      await api.post(`/orders/${orderId}/items`, { items }, tokenKind);
-      await api.post(`/orders/${orderId}/submit`, {}, tokenKind);
-      setCart({});
-      await refreshOrder(orderId);
-    } catch {
-      setError('提交失败，请重试');
-    } finally {
-      setBusy(false);
-    }
-  }
+  const displayError = joinError ?? error;
 
-  async function requestCheckout() {
-    if (!orderId) return;
-    setBusy(true);
-    try {
-      await api.post(`/orders/${orderId}/checkout-request`, {}, tokenKind);
-      await refreshOrder(orderId);
-    } catch {
-      setError('结账请求失败，请重试');
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  if (error) {
+  if (displayError) {
     return (
       <div className="flex min-h-screen items-center justify-center bg-[oklch(98%_0.006_40)] p-6 font-['Nunito_Sans',system-ui,sans-serif]">
-        <p className="text-sm text-[oklch(45%_0.02_30)]">{error}</p>
+        <p className="text-sm text-[oklch(45%_0.02_30)]">{displayError}</p>
       </div>
     );
   }
@@ -144,26 +103,13 @@ export default function GuestOrderPage() {
     );
   }
 
-  const cartTotal = Object.entries(cart).reduce((sum, [dishId, qty]) => {
-    const dish = menu.flatMap((c) => c.dishes).find((d) => d.id === dishId);
-    return sum + (dish ? Number(dish.price) * qty : 0);
-  }, 0);
-
-  const kitchenStatusLabel: Record<string, string> = {
-    pending: '待处理',
-    preparing: '制作中',
-    done: '已完成',
-  };
-
-  const activeCategory = menu.find((c) => c.id === activeCategoryId) ?? menu[0];
-
   return (
     <RealtimeProvider tokenKind={tokenKind}>
-      <RealtimeListener event="connect" onEvent={() => orderId && refreshOrder(orderId).catch(() => {})} />
-      <RealtimeListener event="item_status_changed" onEvent={() => orderId && refreshOrder(orderId).catch(() => {})} />
-      <RealtimeListener event="item_added" onEvent={() => orderId && refreshOrder(orderId).catch(() => {})} />
-      <RealtimeListener event="order_paid" onEvent={() => orderId && refreshOrder(orderId).catch(() => {})} />
-      <RealtimeListener event="order_cancelled" onEvent={() => orderId && refreshOrder(orderId).catch(() => {})} />
+      <RealtimeListener event="connect" onEvent={() => refreshOrder().catch(() => {})} />
+      <RealtimeListener event="item_status_changed" onEvent={() => refreshOrder().catch(() => {})} />
+      <RealtimeListener event="item_added" onEvent={() => refreshOrder().catch(() => {})} />
+      <RealtimeListener event="order_paid" onEvent={() => refreshOrder().catch(() => {})} />
+      <RealtimeListener event="order_cancelled" onEvent={() => refreshOrder().catch(() => {})} />
       <div className="min-h-screen bg-[oklch(98%_0.006_40)] pb-32 font-['Nunito_Sans',system-ui,sans-serif] text-[oklch(22%_0.01_30)]">
         <div className="mx-auto max-w-md">
           <div className="flex items-baseline gap-2.5 rounded-b-[18px] bg-[oklch(60%_0.21_35)] px-5 pb-3 pt-3.5">
@@ -276,7 +222,7 @@ export default function GuestOrderPage() {
                         <Badge variant="secondary">未提交</Badge>
                       ) : (
                         <Badge className={STATUS_BADGE_CLASS[item.kitchenStatus]}>
-                          {kitchenStatusLabel[item.kitchenStatus]}
+                          {KITCHEN_STATUS_LABEL[item.kitchenStatus]}
                         </Badge>
                       )}
                     </li>

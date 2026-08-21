@@ -12,6 +12,7 @@ import { UpsertTableDto } from './dto/upsert-table.dto';
 import { UnmergeTableSessionDto } from './dto/unmerge-table-session.dto';
 import { TransferTableSessionDto } from './dto/transfer-table-session.dto';
 import { UpdatePartySizeDto } from './dto/update-party-size.dto';
+import { TabletOpenDto } from './dto/tablet-open.dto';
 
 @Controller()
 export class TablesController {
@@ -21,6 +22,12 @@ export class TablesController {
   @Get('tables')
   list() {
     return this.tablesService.list();
+  }
+
+  // 不鉴权：桌台平板选桌开台前拉空闲桌台列表用，字段已经在 service 层砍到最小
+  @Get('tables/idle')
+  listIdle() {
+    return this.tablesService.listIdle();
   }
 
   // 桌台/包间是门店"底图"数据，跟菜单目录价同级别，仅 manager 可维护
@@ -89,9 +96,16 @@ export class TablesController {
     return this.tablesService.clearTable(id);
   }
 
-  // 无需登录：顾客扫码或桌台平板首次访问就是通过这个接口换取会话令牌
+  // 无需登录：顾客扫码首次访问就是通过这个接口换取会话令牌
   @Post('table-sessions/:tableId/join')
   join(@Param('tableId') tableId: string, @Body() dto: JoinTableSessionDto) {
     return this.tablesService.joinOrAutoOpen(tableId, dto.partySize);
+  }
+
+  // 无需登录：桌台平板（流动、店员现场选桌）走这个入口，多一道开台密码校验，
+  // 跟顾客扫码的 join 不是同一个入口——不能让扫码 join 也顺带被密码保护住
+  @Post('table-sessions/:tableId/tablet-open')
+  tabletOpen(@Param('tableId') tableId: string, @Body() dto: TabletOpenDto) {
+    return this.tablesService.tabletOpen(tableId, dto.partySize, dto.passcode);
   }
 }

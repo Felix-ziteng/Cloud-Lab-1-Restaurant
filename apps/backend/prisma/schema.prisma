@@ -20,7 +20,12 @@ model StoreConfig {
   reservationEnabled Boolean  @default(false)
   // 界面视觉主题，店长在前台"门店设置"里切换，顾客端/厨房端/前台共用同一份配置
   uiTheme            String   @default("modern")
-  updatedAt          DateTime @updatedAt
+  // 桌台平板（流动、店员现场选桌开台）的开台密码，只存哈希——全店统一一个密码，
+  // 只是挡客人瞎捣乱，不是真安全边界，所以只做"重设"不做"查看当前密码"
+  tabletOpenPasscodeHash String?
+  // 桌台平板点餐视图的布局：菜单少的店用 compact（紧凑），菜单多/自助餐用 browse（长菜单）
+  tabletMenuLayout       String   @default("compact")
+  updatedAt              DateTime @updatedAt
 
   @@map("store_config")
 }

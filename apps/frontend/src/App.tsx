@@ -12,6 +12,7 @@ import FrontDeskDeliveryPage from './pages/FrontDeskDeliveryPage';
 import FrontDeskReportsPage from './pages/FrontDeskReportsPage';
 import FrontDeskManagementPage from './pages/FrontDeskManagementPage';
 import KitchenPage from './pages/KitchenPage';
+import TabletStationPage from './pages/TabletStationPage';
 import TakeoutOrderPage from './pages/TakeoutOrderPage';
 import TrackOrderPage from './pages/TrackOrderPage';
 import OrderStatusPage from './pages/OrderStatusPage';
@@ -23,6 +24,8 @@ import OrderStatusPage from './pages/OrderStatusPage';
 //   /track-order       -> 换设备/清了缓存后，用"订单号 + 手机号"找回订单
 //   /front-desk        -> 店员 / 店长登录站点，左侧边栏 + 子路由（桌台/历史订单/预定/外卖/报表/管理）
 //   /kitchen           -> 厨房 KDS 看板
+//   /tablet            -> 桌台平板（流动、店员现场选桌开台，交给客人点餐；不挂 data-theme，
+//                          视觉固定跟手机点餐页同一套"活力原生 App 风"，见 GuestOrderPage 的说明）
 // 骑手自助端（/rider）暂时不需要：配送状态改为店员在前台直接记录，见 DeliveryPanel
 function App() {
   // 主题是门店级配置，不是某个页面的私有状态——不管从哪个路由进来（顾客扫码点餐、
@@ -50,6 +53,7 @@ function App() {
         <Route path="admin" element={<FrontDeskManagementPage />} />
       </Route>
       <Route path="/kitchen" element={<KitchenPage />} />
+      <Route path="/tablet" element={<TabletStationPage />} />
     </Routes>
   );
 }

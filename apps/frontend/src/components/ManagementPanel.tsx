@@ -53,6 +53,8 @@ function StoreSettings({
   onConfigChange: (config: StoreConfig) => void;
 }) {
   const [error, setError] = useState<string | null>(null);
+  const [passcodeInput, setPasscodeInput] = useState('');
+  const [passcodeSaved, setPasscodeSaved] = useState(false);
 
   async function run(action: () => Promise<void>) {
     setError(null);
@@ -75,6 +77,27 @@ function StoreSettings({
       const updated = await api.patch<StoreConfig>('/store-config', { uiTheme: theme }, 'staffToken');
       onConfigChange(updated);
       applyTheme(updated.uiTheme);
+    });
+  }
+
+  async function changeTabletMenuLayout(layout: StoreConfig['tabletMenuLayout']) {
+    await run(async () => {
+      const updated = await api.patch<StoreConfig>('/store-config', { tabletMenuLayout: layout }, 'staffToken');
+      onConfigChange(updated);
+    });
+  }
+
+  async function setTabletPasscode(e: FormEvent) {
+    e.preventDefault();
+    setPasscodeSaved(false);
+    if (!/^\d{4}$/.test(passcodeInput)) {
+      setError('开台密码必须是 4 位数字');
+      return;
+    }
+    await run(async () => {
+      await api.patch<StoreConfig>('/store-config', { tabletOpenPasscode: passcodeInput }, 'staffToken');
+      setPasscodeInput('');
+      setPasscodeSaved(true);
     });
   }
 
@@ -116,6 +139,40 @@ function StoreSettings({
             </div>
           </RadioGroup>
         </div>
+
+        <div className="flex flex-col gap-2">
+          <p className="text-sm text-muted-foreground">桌台平板点餐视图（菜单少用紧凑，菜单多/自助餐用长菜单）</p>
+          <RadioGroup
+            value={config.tabletMenuLayout}
+            onValueChange={(value) => changeTabletMenuLayout(value as StoreConfig['tabletMenuLayout'])}
+            className="flex flex-row gap-6"
+          >
+            <div className="flex items-center gap-2">
+              <RadioGroupItem value="compact" id="tablet-layout-compact" />
+              <Label htmlFor="tablet-layout-compact">紧凑模式</Label>
+            </div>
+            <div className="flex items-center gap-2">
+              <RadioGroupItem value="browse" id="tablet-layout-browse" />
+              <Label htmlFor="tablet-layout-browse">长菜单模式</Label>
+            </div>
+          </RadioGroup>
+        </div>
+
+        <form onSubmit={setTabletPasscode} className="flex flex-col gap-2">
+          <p className="text-sm text-muted-foreground">
+            桌台平板开台密码（4 位数字，服务员现场选桌开台时用——只能重设，不能查看当前密码）
+          </p>
+          <div className="flex gap-2">
+            <Input
+              className="max-w-32"
+              placeholder="新的 4 位密码"
+              value={passcodeInput}
+              onChange={(e) => setPasscodeInput(e.target.value)}
+            />
+            <Button type="submit">设置开台密码</Button>
+          </div>
+          {passcodeSaved && <p className="text-sm text-foreground">已更新</p>}
+        </form>
       </CardContent>
     </Card>
   );

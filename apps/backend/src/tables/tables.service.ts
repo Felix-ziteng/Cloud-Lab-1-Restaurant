@@ -1,8 +1,9 @@
-import { ConflictException, Injectable, NotFoundException } from '@nestjs/common';
+import { ConflictException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { randomUUID } from 'crypto';
 import { PrismaService } from '../prisma/prisma.service';
 import { RealtimeGateway } from '../realtime/realtime.gateway';
+import { StoreConfigService } from '../store-config/store-config.service';
 import { OpenTableSessionDto } from './dto/open-table-session.dto';
 import { MergeTableSessionDto } from './dto/merge-table-session.dto';
 import { UpsertTableDto } from './dto/upsert-table.dto';
@@ -16,6 +17,7 @@ export class TablesService {
     private readonly prisma: PrismaService,
     private readonly jwtService: JwtService,
     private readonly realtime: RealtimeGateway,
+    private readonly storeConfigService: StoreConfigService,
   ) {}
 
   // 前台桌台看板：每张桌台 + 如果占用中，带出当前会话和账单
@@ -34,6 +36,16 @@ export class TablesService {
       ...table,
       activeSession: sessions[0]?.session ?? null,
     }));
+  }
+
+  // 桌台平板选桌开台用：不鉴权（见 controller 注释），字段砍到最小，不带其他桌的
+  // 账单/顾客信息
+  listIdle() {
+    return this.prisma.table.findMany({
+      where: { status: 'idle' },
+      orderBy: { tableNumber: 'asc' },
+      select: { id: true, tableNumber: true, capacity: true, zone: true },
+    });
   }
 
   createTable(dto: UpsertTableDto) {
@@ -192,8 +204,19 @@ export class TablesService {
       throw new ConflictException('该桌台当前不是待清台状态');
     }
 
+    // 桌台平板（流动、不固定绑桌）监听这一桌自己的会话房间，等这一声"清台完成"
+    // 就自动退回开台密码界面——找刚关闭的那个会话，不是查 table 本身（table 不记
+    // 自己的会话历史）。找不到（比如这桌从来没真正开过台就被清了）就跳过，不算错误
+    const lastSession = await this.prisma.tableSession.findFirst({
+      where: { status: 'closed', tables: { some: { tableId } } },
+      orderBy: { closedAt: 'desc' },
+    });
+
     await this.prisma.table.update({ where: { id: tableId }, data: { status: 'idle' } });
     this.realtime.emitToFrontdesk('table_status_changed', { tableIds: [tableId], status: 'idle' });
+    if (lastSession) {
+      this.realtime.emitToTable(lastSession.id, 'table_session_ended', {});
+    }
   }
 
   // 顾客扫码 / 桌台平板加入。核心规则见 docs/API_DESIGN.md 第 3 节：
@@ -246,5 +269,14 @@ export class TablesService {
     });
 
     return { sessionToken: token, orderId: session.order!.id, tableNumber };
+  }
+
+  // 桌台平板（流动、店员现场选桌）开台：先校验全店统一的开台密码，通过了就直接复用
+  // joinOrAutoOpen 这同一套建会话逻辑——不重新实现一遍开台，跟顾客扫码 join 走的是
+  // 同一个底层方法，只是这里多了一道密码校验、并且 partySize 是必填（服务员现场选的）
+  async tabletOpen(tableId: string, partySize: number, passcode: string) {
+    const valid = await this.storeConfigService.verifyTabletPasscode(passcode);
+    if (!valid) throw new ForbiddenException('开台密码不正确');
+    return this.joinOrAutoOpen(tableId, partySize);
   }
 }
