@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <!-- app_name 由三个 productFlavor 各自的 resValue 提供（见 app/build.gradle），
+         这里不再定义，避免和 flavor 的值冲突 -->
+    <string name="package_name">com.restaurant.terminal</string>
+    <string name="custom_url_scheme">com.restaurant.terminal</string>
+</resources>

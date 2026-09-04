@@ -1,0 +1,81 @@
+apply plugin: 'com.android.application'
+
+android {
+    namespace = "com.restaurant.terminal"
+    compileSdk = rootProject.ext.compileSdkVersion
+    defaultConfig {
+        applicationId "com.restaurant.terminal"
+        minSdkVersion rootProject.ext.minSdkVersion
+        targetSdkVersion rootProject.ext.targetSdkVersion
+        versionCode 1
+        versionName "1.0"
+        testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
+        aaptOptions {
+             // Files and dirs to omit from the packaged assets dir, modified to accommodate modern web apps.
+             // Default: https://android.googlesource.com/platform/frameworks/base/+/282e181b58cf72b6ca770dc7ca5f91f135444502/tools/aapt/AaptAssets.cpp#61
+            ignoreAssetsPattern = '!.svn:!.git:!.ds_store:!*.scc:.*:!CVS:!thumbs.db:!picasa.ini:!*~'
+        }
+    }
+    buildFeatures {
+        buildConfig true
+    }
+    // 前台/厨房/点餐台三个角色共用同一份原生代码，只在下面这三个 flavor 里分叉
+    // applicationId 后缀、App 名称、启动路径——呼应 StoreConfig 那套"一套代码库 +
+    // 运行时/构建期配置区分角色"的项目惯例，而不是三个各自维护的工程
+    flavorDimensions "role"
+    productFlavors {
+        frontdesk {
+            dimension "role"
+            applicationIdSuffix ".frontdesk"
+            resValue "string", "app_name", "前台"
+            buildConfigField "String", "START_PATH", "\"/front-desk\""
+        }
+        kitchen {
+            dimension "role"
+            applicationIdSuffix ".kitchen"
+            resValue "string", "app_name", "厨房看板"
+            buildConfigField "String", "START_PATH", "\"/kitchen\""
+        }
+        tablet {
+            dimension "role"
+            applicationIdSuffix ".tablet"
+            resValue "string", "app_name", "点餐台"
+            buildConfigField "String", "START_PATH", "\"/tablet\""
+        }
+    }
+    buildTypes {
+        release {
+            minifyEnabled false
+            proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'
+        }
+    }
+}
+
+repositories {
+    flatDir{
+        dirs '../capacitor-cordova-android-plugins/src/main/libs', 'libs'
+    }
+}
+
+dependencies {
+    implementation fileTree(include: ['*.jar'], dir: 'libs')
+    implementation "androidx.appcompat:appcompat:$androidxAppCompatVersion"
+    implementation "androidx.coordinatorlayout:coordinatorlayout:$androidxCoordinatorLayoutVersion"
+    implementation "androidx.core:core-splashscreen:$coreSplashScreenVersion"
+    implementation project(':capacitor-android')
+    testImplementation "junit:junit:$junitVersion"
+    androidTestImplementation "androidx.test.ext:junit:$androidxJunitVersion"
+    androidTestImplementation "androidx.test.espresso:espresso-core:$androidxEspressoCoreVersion"
+    implementation project(':capacitor-cordova-android-plugins')
+}
+
+apply from: 'capacitor.build.gradle'
+
+try {
+    def servicesJSON = file('google-services.json')
+    if (servicesJSON.text) {
+        apply plugin: 'com.google.gms.google-services'
+    }
+} catch(Exception e) {
+    logger.info("google-services.json not found, google-services plugin not applied. Push Notifications won't work")
+}
