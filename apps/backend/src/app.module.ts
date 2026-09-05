@@ -7,6 +7,7 @@ import { AuthModule } from './auth/auth.module';
 import { RealtimeModule } from './realtime/realtime.module';
 import { TablesModule } from './tables/tables.module';
 import { MenuModule } from './menu/menu.module';
+import { ModifierGroupsModule } from './modifier-groups/modifier-groups.module';
 import { OrdersModule } from './orders/orders.module';
 import { KitchenModule } from './kitchen/kitchen.module';
 import { DeliveryModule } from './delivery/delivery.module';
@@ -25,6 +26,7 @@ import { PrintJobsModule } from './print-jobs/print-jobs.module';
     StoreConfigModule,
     TablesModule,
     MenuModule,
+    ModifierGroupsModule,
     OrdersModule,
     KitchenModule,
     DeliveryModule,

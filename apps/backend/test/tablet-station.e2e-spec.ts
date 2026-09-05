@@ -7,7 +7,8 @@ import { App } from 'supertest/types';
 import { AppModule } from '../src/app.module';
 import { PrismaService } from '../src/prisma/prisma.service';
 
-// 回归测试：桌台平板（流动、店员现场选桌开台）的开台密码校验 + 密码哈希不泄漏。
+// 回归测试：桌台平板每桌固定开台密码——密码直接定位到桌，不管这张桌当前是空闲
+// 还是已被占用（比如前台先开台了）。取代原来"全店统一密码 + 只能选空闲桌"的机制。
 describe('桌台平板开台 (e2e)', () => {
   let app: INestApplication<App>;
   let prisma: PrismaService;
@@ -33,20 +34,9 @@ describe('桌台平板开台 (e2e)', () => {
     });
     managerId = manager.id;
     managerToken = jwtService.sign({ type: 'staff', sub: manager.id, role: 'manager' });
-
-    // 设置一个已知的开台密码，供下面的用例校验
-    await request(app.getHttpServer())
-      .patch('/api/store-config')
-      .set('Authorization', `Bearer ${managerToken}`)
-      .send({ tabletOpenPasscode: '4321' });
   });
 
   afterAll(async () => {
-    // 收尾：把测试期间设置的密码/布局都清回默认状态，不留痕迹
-    await prisma.storeConfig.update({
-      where: { id: 1 },
-      data: { tabletOpenPasscodeHash: null, tabletMenuLayout: 'compact' },
-    });
     await prisma.staffAccount.delete({ where: { id: managerId } });
     await app.close();
   });
@@ -68,25 +58,31 @@ describe('桌台平板开台 (e2e)', () => {
     tableId = '';
   });
 
-  it('GET /store-config 不会泄漏 tabletOpenPasscodeHash', async () => {
-    const res = await request(app.getHttpServer()).get('/api/store-config');
-    expect(res.status).toBe(200);
-    expect(res.body.tabletOpenPasscodeHash).toBeUndefined();
-    expect(res.body.tabletMenuLayout).toBeDefined();
+  it('POST /tables/resolve-passcode：密码不对 404', async () => {
+    const table = await prisma.table.create({
+      data: { tableNumber: `E2E-TAB-${Date.now()}`, capacity: 4, status: 'idle', passcode: '5001' },
+    });
+    tableId = table.id;
+
+    const res = await request(app.getHttpServer()).post('/api/tables/resolve-passcode').send({ passcode: '0000' });
+    expect(res.status).toBe(404);
   });
 
-  it('POST /store-config/verify-tablet-passcode：密码不对返回 valid:false，密码对了返回 true', async () => {
-    const server = app.getHttpServer();
-    const wrong = await request(server).post('/api/store-config/verify-tablet-passcode').send({ passcode: '0000' });
-    expect(wrong.body).toEqual({ valid: false });
+  it('POST /tables/resolve-passcode：密码对了返回这张桌，包含当前状态', async () => {
+    const table = await prisma.table.create({
+      data: { tableNumber: `E2E-TAB-${Date.now()}`, capacity: 4, status: 'idle', passcode: '5002' },
+    });
+    tableId = table.id;
 
-    const right = await request(server).post('/api/store-config/verify-tablet-passcode').send({ passcode: '4321' });
-    expect(right.body).toEqual({ valid: true });
+    const res = await request(app.getHttpServer()).post('/api/tables/resolve-passcode').send({ passcode: '5002' });
+    expect(res.status).toBe(201);
+    expect(res.body.id).toBe(tableId);
+    expect(res.body.status).toBe('idle');
   });
 
   it('POST /table-sessions/:tableId/tablet-open：密码不对拒绝，不创建会话', async () => {
     const table = await prisma.table.create({
-      data: { tableNumber: `E2E-TAB-${Date.now()}`, capacity: 4, status: 'idle' },
+      data: { tableNumber: `E2E-TAB-${Date.now()}`, capacity: 4, status: 'idle', passcode: '5003' },
     });
     tableId = table.id;
 
@@ -102,13 +98,13 @@ describe('桌台平板开台 (e2e)', () => {
 
   it('POST /table-sessions/:tableId/tablet-open：密码对了正常开台，桌台变 occupied，GET /tables/idle 不再列出它', async () => {
     const table = await prisma.table.create({
-      data: { tableNumber: `E2E-TAB-${Date.now()}`, capacity: 4, status: 'idle' },
+      data: { tableNumber: `E2E-TAB-${Date.now()}`, capacity: 4, status: 'idle', passcode: '5004' },
     });
     tableId = table.id;
 
     const res = await request(app.getHttpServer())
       .post(`/api/table-sessions/${tableId}/tablet-open`)
-      .send({ partySize: 3, passcode: '4321' });
+      .send({ partySize: 3, passcode: '5004' });
 
     expect(res.status).toBe(201);
     expect(res.body.sessionToken).toBeDefined();
@@ -119,5 +115,33 @@ describe('桌台平板开台 (e2e)', () => {
 
     const idleList = await request(app.getHttpServer()).get('/api/tables/idle');
     expect(idleList.body.some((t: { id: string }) => t.id === tableId)).toBe(false);
+  });
+
+  it('前台已经开台的桌，平板凭密码仍能查到（状态 occupied）并直接接入同一个会话，而不是报错', async () => {
+    const table = await prisma.table.create({
+      data: { tableNumber: `E2E-TAB-${Date.now()}`, capacity: 4, status: 'idle', passcode: '5005' },
+    });
+    tableId = table.id;
+
+    // 前台手动开台（店员登录后的入口，不经过平板密码）
+    const openRes = await request(app.getHttpServer())
+      .post('/api/table-sessions')
+      .set('Authorization', `Bearer ${managerToken}`)
+      .send({ tableIds: [tableId], partySize: 2 });
+    expect(openRes.status).toBe(201);
+
+    // 平板这时候才拿到这张桌的密码，resolve-passcode 应该还能查到，状态是 occupied
+    const resolveRes = await request(app.getHttpServer())
+      .post('/api/tables/resolve-passcode')
+      .send({ passcode: '5005' });
+    expect(resolveRes.status).toBe(201);
+    expect(resolveRes.body.status).toBe('occupied');
+
+    // 不传 partySize（前端已被占用桌不问人数），应该直接接入前台开的那个会话，而不是报错
+    const openTabletRes = await request(app.getHttpServer())
+      .post(`/api/table-sessions/${tableId}/tablet-open`)
+      .send({ passcode: '5005' });
+    expect(openTabletRes.status).toBe(201);
+    expect(openTabletRes.body.orderId).toBe(openRes.body.order.id);
   });
 });

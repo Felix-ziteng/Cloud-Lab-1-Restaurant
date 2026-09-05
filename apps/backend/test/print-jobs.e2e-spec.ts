@@ -85,7 +85,7 @@ describe('打印队列 (e2e)', () => {
     it('堂食提交一轮点餐后，生成一个厨房打印任务，内容跟这一轮的菜品一致', async () => {
       const server = app.getHttpServer();
       const table = await prisma.table.create({
-        data: { tableNumber: `E2E-PRT-${Date.now()}`, capacity: 2, status: 'idle' },
+        data: { tableNumber: `E2E-PRT-${Date.now()}`, capacity: 2, status: 'idle', passcode: '6003' },
       });
       tableId = table.id;
 
@@ -107,7 +107,9 @@ describe('打印队列 (e2e)', () => {
       expect(job).toBeDefined();
       expect(job.type).toBe('kitchen');
       expect(job.status).toBe('pending');
-      expect(job.payload.items).toEqual([{ dishName: 'E2E-打印菜', quantity: 3, notes: '少放盐' }]);
+      expect(job.payload.items).toEqual([
+        { dishName: 'E2E-打印菜', quantity: 3, notes: '少放盐', modifiers: [] },
+      ]);
       expect(job.payload.tableLabel).toBe(table.tableNumber);
       expect(job.payload.roundNumber).toBe(1);
     });
@@ -115,7 +117,7 @@ describe('打印队列 (e2e)', () => {
     it('店员记录收款后，生成一个收据打印任务，金额跟订单一致', async () => {
       const server = app.getHttpServer();
       const table = await prisma.table.create({
-        data: { tableNumber: `E2E-PRT-${Date.now()}`, capacity: 2, status: 'idle' },
+        data: { tableNumber: `E2E-PRT-${Date.now()}`, capacity: 2, status: 'idle', passcode: '6004' },
       });
       tableId = table.id;
 

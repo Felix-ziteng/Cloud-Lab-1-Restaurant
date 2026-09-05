@@ -38,6 +38,7 @@ describe('POST /table-sessions/:tableId/join (e2e)', () => {
         tableNumber: `E2E-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
         capacity: 2,
         status: 'idle',
+        passcode: '6008',
       },
     });
     tableId = table.id;

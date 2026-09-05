@@ -78,6 +78,11 @@ export default function KitchenPage() {
                       <p className="text-base font-medium text-foreground">
                         {item.dishNameSnapshot} × {item.quantity}
                       </p>
+                      {item.selectedModifiers && item.selectedModifiers.length > 0 && (
+                        <p className="text-sm text-muted-foreground">
+                          {item.selectedModifiers.map((m) => m.optionLabel).join(' · ')}
+                        </p>
+                      )}
                       {item.notes && <p className="text-sm text-muted-foreground">备注：{item.notes}</p>}
                     </div>
                     <div className="flex gap-2">

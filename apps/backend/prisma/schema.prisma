@@ -20,11 +20,11 @@ model StoreConfig {
   reservationEnabled Boolean  @default(false)
   // 界面视觉主题，店长在前台"门店设置"里切换，顾客端/厨房端/前台共用同一份配置
   uiTheme            String   @default("modern")
-  // 桌台平板（流动、店员现场选桌开台）的开台密码，只存哈希——全店统一一个密码，
-  // 只是挡客人瞎捣乱，不是真安全边界，所以只做"重设"不做"查看当前密码"
-  tabletOpenPasscodeHash String?
   // 桌台平板点餐视图的布局：菜单少的店用 compact（紧凑），菜单多/自助餐用 browse（长菜单）
   tabletMenuLayout       String   @default("compact")
+  // 这两个开关默认关闭：不强迫所有店铺维护辣度/过敏原字段，开启后新增/编辑菜品才必须标注（见 menu.service.ts）
+  showSpicyLevel         Boolean  @default(false)
+  showAllergens          Boolean  @default(false)
   updatedAt              DateTime @updatedAt
 
   @@map("store_config")
@@ -126,6 +126,10 @@ model Table {
   capacity    Int
   zone        String?
   status      TableStatus @default(idle)
+  // 每桌固定 4 位开台密码，明文存储（要贴在桌上给人看、店长要能在管理界面查看/打印，
+  // 不是安全边界）。平板凭密码直接定位到这张桌，不管这张桌当前空闲还是已被占用——
+  // 取代原来"全店统一密码 + 只能选空闲桌"的机制，见 tables.service.ts 的 resolveByPasscode
+  passcode String @unique
 
   sessions     TableSessionTable[]
   reservations Reservation[]
@@ -217,6 +221,9 @@ model OrderItem {
   unitPriceSnapshot Decimal       @db.Decimal(10, 2)
   quantity          Int
   notes             String?
+  // 下单时选的加料/口味选项快照（文字，不存 optionId 外键）：
+  // { groupName, optionLabel, priceDelta }[]，商家以后改/删选项组模板不影响历史订单显示
+  selectedModifiers Json?
   kitchenStatus     KitchenStatus @default(pending)
   // 0 = 尚未提交的购物车项；submit 时统一分配真实轮次并写入 submittedAt（见 orders.service.ts）
   roundNumber       Int           @default(0)
@@ -252,10 +259,59 @@ model Dish {
   imageUrl    String?
   isAvailable Boolean  @default(true)
   sortOrder   Int      @default(0)
+  // null = 未标注；0/1/2/3 = 不辣/微辣/中辣/特辣（0 也是"已标注"，不是空）
+  spicyLevel  Int?
+  // 固定过敏原 id 清单（见 shared-types ALLERGEN_OPTIONS），空数组=已标注为"不含"或尚未编辑过
+  allergens   String[] @default([])
 
   orderItems OrderItem[]
+  modifierGroups DishModifierGroup[]
 
   @@map("dishes")
+}
+
+enum ModifierSelectionType {
+  single_required // 必选单选，比如"选面型"
+  single_optional // 可选单选，比如"辣度"
+  multiple        // 可选多选，比如"加料"
+}
+
+// 门店级"选项组模板"：商家自己定义（不预设枚举），可以挂到多道菜上复用
+model ModifierGroup {
+  id            String                @id @default(uuid())
+  name          String
+  selectionType ModifierSelectionType
+  sortOrder     Int                   @default(0)
+
+  options   ModifierOption[]
+  dishLinks DishModifierGroup[]
+
+  @@map("modifier_groups")
+}
+
+model ModifierOption {
+  id         String        @id @default(uuid())
+  groupId    String
+  group      ModifierGroup @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  label      String
+  priceDelta Decimal       @default(0) @db.Decimal(10, 2)
+  sortOrder  Int           @default(0)
+
+  @@map("modifier_options")
+}
+
+// 菜品 <-> 选项组模板 的多对多挂载：哪些菜适用哪些模板
+model DishModifierGroup {
+  dishId    String
+  dish      Dish          @relation(fields: [dishId], references: [id], onDelete: Cascade)
+  groupId   String
+  // 组本身有没有被挂到菜品，由 ModifierGroupsService.delete() 主动查数量拦截（提示先取消勾选），
+  // 这里故意不设 onDelete: Cascade——不能让删组的时候悄悄把挂载关系一起冲掉
+  group     ModifierGroup @relation(fields: [groupId], references: [id])
+  sortOrder Int           @default(0)
+
+  @@id([dishId, groupId])
+  @@map("dish_modifier_groups")
 }
 
 model StaffAccount {

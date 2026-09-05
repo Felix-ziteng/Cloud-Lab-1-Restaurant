@@ -1,9 +1,9 @@
 import { useEffect, useState } from 'react';
-import type { StoreConfig } from '@restaurant/shared-types';
+import type { StoreConfig, Table } from '@restaurant/shared-types';
 import { api, setToken, clearToken } from '../api/client';
 import { RealtimeProvider, RealtimeListener } from '../realtime/RealtimeContext';
 import TabletPasscodeScreen from '../components/TabletPasscodeScreen';
-import TabletTableSelectScreen from '../components/TabletTableSelectScreen';
+import TabletPartySizeScreen from '../components/TabletPartySizeScreen';
 import TabletOrderingCompact from '../components/TabletOrderingCompact';
 import TabletOrderingBrowse from '../components/TabletOrderingBrowse';
 
@@ -58,20 +58,20 @@ function LandscapeGuardScreen() {
 }
 
 // 桌台平板固定打开的这一个页面（所有平板都配置成同一个网址，见项目决策记录）：
-// 密码 -> 选桌+人数 -> 点餐视图，三段状态机，不用 URL 参数记录当前在服务哪张桌
+// 密码 -> 人数确认/直接接入 -> 点餐视图，三段状态机，不用 URL 参数记录当前在服务哪张桌
 // （平板不换页面，只切内部视图）。清台后自动退回密码页靠监听 table_session_ended。
+// 密码不再是全店统一的（见项目决策记录）：每张桌自己固定一个密码，输入后直接定位到
+// 是哪张桌，不管这张桌当前空闲还是已被占用。
 export default function TabletStationPage() {
   const [phase, setPhase] = useState<Phase>('passcode');
   const [passcode, setPasscode] = useState('');
+  const [resolvedTable, setResolvedTable] = useState<Table | null>(null);
   const [session, setSession] = useState<ActiveSession | null>(null);
-  const [menuLayout, setMenuLayout] = useState<StoreConfig['tabletMenuLayout']>('compact');
+  const [config, setConfig] = useState<StoreConfig | null>(null);
   const isLandscapeTablet = useIsLandscapeTablet();
 
   useEffect(() => {
-    api
-      .get<StoreConfig>('/store-config')
-      .then((config) => setMenuLayout(config.tabletMenuLayout))
-      .catch(() => {});
+    api.get<StoreConfig>('/store-config').then(setConfig).catch(() => {});
   }, []);
 
   if (!isLandscapeTablet) {
@@ -82,13 +82,15 @@ export default function TabletStationPage() {
     if (session) clearToken(`guest:${session.tableId}`);
     setSession(null);
     setPasscode('');
+    setResolvedTable(null);
     setPhase('passcode');
   }
 
   if (phase === 'passcode') {
     return (
       <TabletPasscodeScreen
-        onSuccess={(pin) => {
+        onSuccess={({ table, passcode: pin }) => {
+          setResolvedTable(table);
           setPasscode(pin);
           setPhase('select');
         }}
@@ -97,9 +99,15 @@ export default function TabletStationPage() {
   }
 
   if (phase === 'select') {
+    if (!resolvedTable) {
+      resetToPasscode();
+      return null;
+    }
     return (
-      <TabletTableSelectScreen
+      <TabletPartySizeScreen
+        table={resolvedTable}
         passcode={passcode}
+        onBack={resetToPasscode}
         onOpened={({ tableId, tableNumber, orderId, sessionToken }) => {
           setToken(`guest:${tableId}`, sessionToken);
           setSession({ tableId, tableNumber, orderId });
@@ -116,14 +124,14 @@ export default function TabletStationPage() {
   }
 
   const tokenKind = `guest:${session.tableId}`;
-  const OrderingView = menuLayout === 'browse' ? TabletOrderingBrowse : TabletOrderingCompact;
+  const OrderingView = config?.tabletMenuLayout === 'browse' ? TabletOrderingBrowse : TabletOrderingCompact;
 
   return (
     <RealtimeProvider tokenKind={tokenKind}>
       {/* 店员在前台点"清台完成"，这一桌的会话房间会收到这一声——平板自动复位回密码页，
           不需要客人或店员在平板上做任何操作 */}
       <RealtimeListener event="table_session_ended" onEvent={resetToPasscode} />
-      <OrderingView orderId={session.orderId} tokenKind={tokenKind} tableNumber={session.tableNumber} />
+      <OrderingView orderId={session.orderId} tokenKind={tokenKind} tableNumber={session.tableNumber} config={config} />
     </RealtimeProvider>
   );
 }

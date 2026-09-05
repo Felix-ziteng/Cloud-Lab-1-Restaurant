@@ -40,7 +40,10 @@ export class OrdersService {
       throw new BadRequestException('配送地址不能为空');
     }
 
-    const dishes = await this.prisma.dish.findMany({ where: { id: { in: dto.items.map((i) => i.dishId) } } });
+    const dishes = await this.prisma.dish.findMany({
+      where: { id: { in: dto.items.map((i) => i.dishId) } },
+      include: this.dishModifierGroupsInclude,
+    });
     const staffId = actor.type === 'staff' ? actor.staffId : undefined;
 
     const order = await this.prisma.$transaction(async (tx) => {
@@ -82,16 +85,18 @@ export class OrdersService {
     this.realtime.emitToKitchen('new_order_item', { orderId: order.id, roundNumber: 1 });
     this.realtime.emitToFrontdesk('order_created', { orderId: order.id, type: order.type });
 
+    const createdItems = await this.prisma.orderItem.findMany({ where: { orderId: order.id } });
     await this.printJobsService.createKitchenJob(order.id, {
       orderId: order.id,
       orderNumber: order.orderNumber,
       orderType: order.type,
       tableLabel: null, // 这个入口只建外卖/自提订单，没有桌台
       roundNumber: 1,
-      items: dto.items.map((i) => ({
-        dishName: dishes.find((d) => d.id === i.dishId)?.name ?? '未知菜品',
+      items: createdItems.map((i) => ({
+        dishName: i.dishNameSnapshot,
         quantity: i.quantity,
-        notes: i.notes ?? null,
+        notes: i.notes,
+        modifiers: this.formatSelectedModifiers(i.selectedModifiers),
       })),
       createdAt: order.createdAt.toISOString(),
     });
@@ -160,7 +165,10 @@ export class OrdersService {
     if (!order) throw new NotFoundException('订单不存在');
     if (order.status !== 'open') throw new BadRequestException('该订单已不可加菜');
 
-    const dishes = await this.prisma.dish.findMany({ where: { id: { in: dto.items.map((i) => i.dishId) } } });
+    const dishes = await this.prisma.dish.findMany({
+      where: { id: { in: dto.items.map((i) => i.dishId) } },
+      include: this.dishModifierGroupsInclude,
+    });
 
     await this.insertItems(this.prisma, orderId, dto.items, dishes, actorType, actorId);
     const updated = await this.recalculateTotals(orderId, this.prisma);
@@ -248,7 +256,12 @@ export class OrdersService {
       orderType: order.type,
       tableLabel,
       roundNumber: nextRound,
-      items: submittedItems.map((i) => ({ dishName: i.dishNameSnapshot, quantity: i.quantity, notes: i.notes })),
+      items: submittedItems.map((i) => ({
+        dishName: i.dishNameSnapshot,
+        quantity: i.quantity,
+        notes: i.notes,
+        modifiers: this.formatSelectedModifiers(i.selectedModifiers),
+      })),
       createdAt: new Date().toISOString(),
     });
 
@@ -385,11 +398,33 @@ export class OrdersService {
     return updated;
   }
 
+  // GET /menu 那边也拍平了同一层中间表（见 menu.service.ts），这里单独复用是因为
+  // dish 在这里是通过 orders 模块自己的 findMany 拿的，两边没有共享同一次查询
+  private readonly dishModifierGroupsInclude = {
+    modifierGroups: { include: { group: { include: { options: true } } } },
+  } as const;
+
+  private formatSelectedModifiers(raw: unknown): string[] {
+    if (!Array.isArray(raw)) return [];
+    return (raw as { groupName: string; optionLabel: string }[]).map((m) => `${m.groupName}：${m.optionLabel}`);
+  }
+
   private async insertItems(
     tx: Pick<PrismaService, 'orderItem'>,
     orderId: string,
-    items: { dishId: string; quantity: number; notes?: string }[],
-    dishes: { id: string; name: string; price: unknown }[],
+    items: { dishId: string; quantity: number; notes?: string; selectedOptionIds?: string[] }[],
+    dishes: {
+      id: string;
+      name: string;
+      price: unknown;
+      modifierGroups: {
+        group: {
+          name: string;
+          selectionType: string;
+          options: { id: string; label: string; priceDelta: unknown }[];
+        };
+      }[];
+    }[],
     actorType: 'customer' | 'staff',
     actorId?: string,
   ) {
@@ -397,14 +432,40 @@ export class OrdersService {
       const dish = dishes.find((d) => d.id === item.dishId);
       if (!dish) throw new BadRequestException(`菜品不存在: ${item.dishId}`);
 
+      const selectedOptionIds = item.selectedOptionIds ?? [];
+      let priceDelta = 0;
+      const selectedModifiers: { groupName: string; optionLabel: string; priceDelta: string }[] = [];
+
+      // 只按这道菜"当前"挂着的选项组模板校验——跟辣度/过敏原开关同一个原则：
+      // 校验的是下单这一刻商家的配置，不是历史快照
+      for (const link of dish.modifierGroups) {
+        const group = link.group;
+        const chosen = group.options.filter((o) => selectedOptionIds.includes(o.id));
+        if (group.selectionType === 'single_required' && chosen.length !== 1) {
+          throw new BadRequestException(`请为「${dish.name}」选择「${group.name}」`);
+        }
+        if (group.selectionType === 'single_optional' && chosen.length > 1) {
+          throw new BadRequestException(`「${group.name}」只能选一项`);
+        }
+        for (const option of chosen) {
+          priceDelta += Number(option.priceDelta);
+          selectedModifiers.push({
+            groupName: group.name,
+            optionLabel: option.label,
+            priceDelta: String(option.priceDelta),
+          });
+        }
+      }
+
       await tx.orderItem.create({
         data: {
           orderId,
           dishId: dish.id,
           dishNameSnapshot: dish.name,
-          unitPriceSnapshot: dish.price as never,
+          unitPriceSnapshot: (Number(dish.price) + priceDelta) as never,
           quantity: item.quantity,
           notes: item.notes,
+          selectedModifiers: selectedModifiers.length > 0 ? selectedModifiers : undefined,
           addedByType: actorType,
           addedByStaffId: actorType === 'staff' ? actorId : undefined,
         },

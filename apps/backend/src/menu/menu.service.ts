@@ -1,31 +1,83 @@
-import { ConflictException, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ConflictException, Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
+import { StoreConfigService } from '../store-config/store-config.service';
 import { UpsertDishDto } from './dto/upsert-dish.dto';
 import { UpsertCategoryDto } from './dto/upsert-category.dto';
 
 @Injectable()
 export class MenuService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly storeConfig: StoreConfigService,
+  ) {}
 
   // 顾客视角：只看可售菜品；店员/管理端传 includeUnavailable=true 看全部
   async getMenu(includeUnavailable = false) {
-    return this.prisma.category.findMany({
+    const categories = await this.prisma.category.findMany({
       orderBy: { sortOrder: 'asc' },
       include: {
         dishes: {
           where: includeUnavailable ? {} : { isAvailable: true },
           orderBy: { sortOrder: 'asc' },
+          include: {
+            modifierGroups: {
+              orderBy: { sortOrder: 'asc' },
+              include: { group: { include: { options: { orderBy: { sortOrder: 'asc' } } } } },
+            },
+          },
         },
       },
     });
+
+    // DishModifierGroup 只是挂载关系的中间表，前端点餐界面只关心"这道菜挂了哪些选项组模板"，
+    // 这里拍平掉中间表那一层，只留 group 本身
+    return categories.map((category) => ({
+      ...category,
+      dishes: category.dishes.map((dish) => {
+        const { modifierGroups, ...rest } = dish;
+        return { ...rest, modifierGroups: modifierGroups.map((link) => link.group) };
+      }),
+    }));
   }
 
-  createDish(dto: UpsertDishDto) {
-    return this.prisma.dish.create({ data: dto });
+  // 同步菜品 <-> 选项组模板的挂载关系：传了 modifierGroupIds 就整组替换成这个列表，
+  // 不传（undefined）表示这次编辑不touch挂载，维持现状——避免每次编辑菜品其它字段时
+  // 不小心把已挂的选项组清空
+  private async syncModifierGroups(dishId: string, modifierGroupIds: string[] | undefined) {
+    if (modifierGroupIds === undefined) return;
+    await this.prisma.dishModifierGroup.deleteMany({ where: { dishId } });
+    if (modifierGroupIds.length === 0) return;
+    await this.prisma.dishModifierGroup.createMany({
+      data: modifierGroupIds.map((groupId, index) => ({ dishId, groupId, sortOrder: index })),
+    });
   }
 
-  updateDish(id: string, dto: UpsertDishDto) {
-    return this.prisma.dish.update({ where: { id }, data: dto });
+  // 门店开启了"显示辣度/过敏原"之后，新增/编辑菜品就必须显式标注——不允许留空，
+  // 避免客人把"没标"误读成"确认不含"（见跟用户讨论过敏原风险的决策记录）
+  private async assertTasteInfoComplete(dto: UpsertDishDto) {
+    const config = await this.storeConfig.get();
+    if (config.showSpicyLevel && dto.spicyLevel === undefined) {
+      throw new BadRequestException('已开启辣度显示，新增/编辑菜品时必须选择辣度等级');
+    }
+    if (config.showAllergens && dto.allergens === undefined) {
+      throw new BadRequestException('已开启过敏原显示，新增/编辑菜品时必须确认过敏原（没有就都不选）');
+    }
+  }
+
+  async createDish(dto: UpsertDishDto) {
+    await this.assertTasteInfoComplete(dto);
+    const { modifierGroupIds, ...data } = dto;
+    const dish = await this.prisma.dish.create({ data });
+    await this.syncModifierGroups(dish.id, modifierGroupIds);
+    return dish;
+  }
+
+  async updateDish(id: string, dto: UpsertDishDto) {
+    await this.assertTasteInfoComplete(dto);
+    const { modifierGroupIds, ...data } = dto;
+    const dish = await this.prisma.dish.update({ where: { id }, data });
+    await this.syncModifierGroups(id, modifierGroupIds);
+    return dish;
   }
 
   async deleteDish(id: string) {

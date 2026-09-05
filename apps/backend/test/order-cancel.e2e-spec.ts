@@ -80,7 +80,7 @@ describe('订单取消 (e2e)', () => {
   async function openOrder() {
     const server = app.getHttpServer();
     const table = await prisma.table.create({
-      data: { tableNumber: `E2E-CXL-${Date.now()}`, capacity: 2, status: 'idle' },
+      data: { tableNumber: `E2E-CXL-${Date.now()}`, capacity: 2, status: 'idle', passcode: '6006' },
     });
     tableId = table.id;
     const joinRes = await request(server).post(`/api/table-sessions/${table.id}/join`).send({ partySize: 2 });

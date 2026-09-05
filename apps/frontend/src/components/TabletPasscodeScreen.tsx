@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import type { Table } from '@restaurant/shared-types';
 import { api } from '../api/client';
 
 const KEYS = ['1', '2', '3', '4', '5', '6', '7', '8', '9', '', '0', 'backspace'] as const;
@@ -21,9 +22,14 @@ function BackspaceIcon() {
   );
 }
 
-// 桌台平板的第一屏：全店统一的 4 位开台密码，不挂店员登录（见项目决策记录）。
+// 桌台平板的第一屏：每张桌自己固定的 4 位密码（贴在桌上），不挂店员登录（见项目决策记录）。
 // 密码只是挡客人瞎捣乱，不是真安全边界，所以不限制重试次数，错了直接提示重来。
-export default function TabletPasscodeScreen({ onSuccess }: { onSuccess: (passcode: string) => void }) {
+// 密码直接定位到是哪张桌——不管这张桌当前空闲还是已被占用（比如前台已经开台了）。
+export default function TabletPasscodeScreen({
+  onSuccess,
+}: {
+  onSuccess: (result: { table: Table; passcode: string }) => void;
+}) {
   const [digits, setDigits] = useState('');
   const [checking, setChecking] = useState(false);
   const [wrong, setWrong] = useState(false);
@@ -31,13 +37,8 @@ export default function TabletPasscodeScreen({ onSuccess }: { onSuccess: (passco
   async function submit(passcode: string) {
     setChecking(true);
     try {
-      const res = await api.post<{ valid: boolean }>('/store-config/verify-tablet-passcode', { passcode });
-      if (res.valid) {
-        onSuccess(passcode);
-      } else {
-        setWrong(true);
-        setDigits('');
-      }
+      const table = await api.post<Table>('/tables/resolve-passcode', { passcode });
+      onSuccess({ table, passcode });
     } catch {
       setWrong(true);
       setDigits('');
@@ -67,7 +68,7 @@ export default function TabletPasscodeScreen({ onSuccess }: { onSuccess: (passco
             <LockIcon />
           </div>
           <h1 className="font-['Baloo_2',system-ui,sans-serif] text-2xl font-bold">请输入开台密码</h1>
-          <p className="text-sm text-[oklch(50%_0.02_40)]">全店统一密码，由店长在门店设置中管理</p>
+          <p className="text-sm text-[oklch(50%_0.02_40)]">这张桌自己的密码，贴在桌上</p>
           {wrong && <p className="text-sm font-bold text-[oklch(50%_0.2_25)]">密码错误，请重新输入</p>}
         </div>
 

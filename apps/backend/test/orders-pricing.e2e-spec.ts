@@ -68,7 +68,12 @@ describe('订单价格计算 (e2e)', () => {
   async function openOrderWithItems(items: { dishId: string; quantity: number }[]) {
     const server = app.getHttpServer();
     const table = await prisma.table.create({
-      data: { tableNumber: `E2E-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`, capacity: 2, status: 'idle' },
+      data: {
+        tableNumber: `E2E-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+        capacity: 2,
+        status: 'idle',
+        passcode: '6005',
+      },
     });
     tableId = table.id;
 

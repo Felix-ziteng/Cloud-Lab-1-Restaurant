@@ -13,9 +13,9 @@ async function main() {
 
   await prisma.table.createMany({
     data: [
-      { tableNumber: 'A1', capacity: 2 },
-      { tableNumber: 'A2', capacity: 4 },
-      { tableNumber: 'B1', capacity: 6, zone: '包间' },
+      { tableNumber: 'A1', capacity: 2, passcode: '1234' },
+      { tableNumber: 'A2', capacity: 4, passcode: '1235' },
+      { tableNumber: 'B1', capacity: 6, zone: '包间', passcode: '1236' },
     ],
   });
 

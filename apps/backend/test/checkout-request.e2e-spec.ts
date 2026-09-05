@@ -49,7 +49,7 @@ describe('POST /orders/:id/checkout-request (e2e)', () => {
   it('发起结账后：订单变待结账，堂食桌台立刻变待清台（不等收款）', async () => {
     const server = app.getHttpServer();
     const table = await prisma.table.create({
-      data: { tableNumber: `E2E-CKO-${Date.now()}`, capacity: 2, status: 'idle' },
+      data: { tableNumber: `E2E-CKO-${Date.now()}`, capacity: 2, status: 'idle', passcode: '6007' },
     });
     tableId = table.id;
 

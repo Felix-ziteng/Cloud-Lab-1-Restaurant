@@ -13,6 +13,7 @@ import { UnmergeTableSessionDto } from './dto/unmerge-table-session.dto';
 import { TransferTableSessionDto } from './dto/transfer-table-session.dto';
 import { UpdatePartySizeDto } from './dto/update-party-size.dto';
 import { TabletOpenDto } from './dto/tablet-open.dto';
+import { ResolvePasscodeDto } from './dto/resolve-passcode.dto';
 
 @Controller()
 export class TablesController {
@@ -28,6 +29,13 @@ export class TablesController {
   @Get('tables/idle')
   listIdle() {
     return this.tablesService.listIdle();
+  }
+
+  // 不鉴权：桌台平板输入这张桌自己的密码后，凭密码直接定位到是哪张桌
+  // （不管当前是空闲还是已被占用），跟 tablet-open 同一信任级别
+  @Post('tables/resolve-passcode')
+  resolveByPasscode(@Body() dto: ResolvePasscodeDto) {
+    return this.tablesService.resolveByPasscode(dto.passcode);
   }
 
   // 桌台/包间是门店"底图"数据，跟菜单目录价同级别，仅 manager 可维护

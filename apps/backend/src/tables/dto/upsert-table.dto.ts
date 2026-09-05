@@ -1,4 +1,4 @@
-import { IsInt, IsOptional, IsString, Min } from 'class-validator';
+import { IsInt, IsOptional, IsString, Matches, Min } from 'class-validator';
 
 export class UpsertTableDto {
   @IsString()
@@ -11,4 +11,8 @@ export class UpsertTableDto {
   @IsOptional()
   @IsString()
   zone?: string;
+
+  @IsString()
+  @Matches(/^\d{4}$/, { message: 'passcode 必须是 4 位数字' })
+  passcode: string;
 }

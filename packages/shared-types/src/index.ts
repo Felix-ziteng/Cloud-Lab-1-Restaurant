@@ -13,6 +13,46 @@ export interface StoreConfig {
   // 桌台平板开台密码只存哈希，GET /store-config 这个公开接口不会把它吐出来，
   // 前端永远看不到这个字段——不要以为漏写了，是后端故意排除的
   tabletMenuLayout: TabletMenuLayout;
+  showSpicyLevel: boolean;
+  showAllergens: boolean;
+}
+
+// 固定过敏原清单：先做常见的几种，不做自定义/无限扩展
+export const ALLERGEN_OPTIONS = [
+  { id: "peanut", label: "花生" },
+  { id: "tree_nut", label: "坚果" },
+  { id: "gluten", label: "麸质/小麦" },
+  { id: "soy", label: "大豆" },
+  { id: "egg", label: "蛋类" },
+  { id: "dairy", label: "奶制品" },
+  { id: "shellfish", label: "海鲜/贝类" },
+] as const;
+export type AllergenId = (typeof ALLERGEN_OPTIONS)[number]["id"];
+
+export const SPICY_LEVEL_LABELS = ["不辣", "微辣", "中辣", "特辣"] as const;
+
+// 商家自定义的"选项组模板"（选面型、加料等），不是固定枚举——每家店自己建
+export type ModifierSelectionType = "single_required" | "single_optional" | "multiple";
+
+export interface ModifierOption {
+  id: string;
+  label: string;
+  priceDelta: string;
+}
+
+export interface ModifierGroup {
+  id: string;
+  name: string;
+  selectionType: ModifierSelectionType;
+  sortOrder: number;
+  options: ModifierOption[];
+}
+
+// 下单时选的选项快照，存在 OrderItem 上——不引用 optionId，商家以后改/删模板不影响历史订单显示
+export interface SelectedModifier {
+  groupName: string;
+  optionLabel: string;
+  priceDelta: string;
 }
 
 export type TableStatus = "idle" | "occupied" | "pending_clear";
@@ -23,6 +63,7 @@ export interface Table {
   capacity: number;
   zone: string | null;
   status: TableStatus;
+  passcode: string;
 }
 
 export type TableSessionStatus = "open" | "pending_checkout" | "closed";
@@ -72,6 +113,7 @@ export interface OrderItem {
   unitPriceSnapshot: string;
   quantity: number;
   notes: string | null;
+  selectedModifiers: SelectedModifier[] | null;
   kitchenStatus: KitchenStatus;
   roundNumber: number;
   submittedAt: string | null;
@@ -101,6 +143,10 @@ export interface Dish {
   imageUrl: string | null;
   isAvailable: boolean;
   sortOrder: number;
+  spicyLevel: number | null;
+  allergens: string[];
+  // 这道菜挂载的加料/口味选项组模板，GET /menu 直接内嵌返回
+  modifierGroups: ModifierGroup[];
 }
 
 export type StaffRole = "staff" | "manager";
@@ -241,7 +287,7 @@ export interface KitchenTicketPayload {
   orderType: OrderType;
   tableLabel: string | null;
   roundNumber: number;
-  items: { dishName: string; quantity: number; notes: string | null }[];
+  items: { dishName: string; quantity: number; notes: string | null; modifiers: string[] }[];
   createdAt: string;
 }
 

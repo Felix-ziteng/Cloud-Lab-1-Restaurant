@@ -1,5 +1,14 @@
 import { useEffect, useState, type FormEvent } from 'react';
-import type { Dish, MenuCategory, TableWithSession, StaffAccount, StoreConfig } from '@restaurant/shared-types';
+import {
+  ALLERGEN_OPTIONS,
+  SPICY_LEVEL_LABELS,
+  type Dish,
+  type MenuCategory,
+  type ModifierGroup,
+  type TableWithSession,
+  type StaffAccount,
+  type StoreConfig,
+} from '@restaurant/shared-types';
 import { api } from '../api/client';
 import { applyTheme } from '../theme/applyTheme';
 import { Button } from '@/components/ui/button';
@@ -30,7 +39,7 @@ export default function ManagementPanel({
         <TabsTrigger value="settings">门店设置</TabsTrigger>
       </TabsList>
       <TabsContent value="menu">
-        <MenuManagement />
+        <MenuManagement config={config} />
       </TabsContent>
       <TabsContent value="tables">
         <TableManagement />
@@ -53,8 +62,6 @@ function StoreSettings({
   onConfigChange: (config: StoreConfig) => void;
 }) {
   const [error, setError] = useState<string | null>(null);
-  const [passcodeInput, setPasscodeInput] = useState('');
-  const [passcodeSaved, setPasscodeSaved] = useState(false);
 
   async function run(action: () => Promise<void>) {
     setError(null);
@@ -87,20 +94,6 @@ function StoreSettings({
     });
   }
 
-  async function setTabletPasscode(e: FormEvent) {
-    e.preventDefault();
-    setPasscodeSaved(false);
-    if (!/^\d{4}$/.test(passcodeInput)) {
-      setError('开台密码必须是 4 位数字');
-      return;
-    }
-    await run(async () => {
-      await api.patch<StoreConfig>('/store-config', { tabletOpenPasscode: passcodeInput }, 'staffToken');
-      setPasscodeInput('');
-      setPasscodeSaved(true);
-    });
-  }
-
   return (
     <Card>
       <CardHeader>
@@ -121,6 +114,22 @@ function StoreSettings({
             才打开（见项目记忆 delivery_reservation_modules_off_by_default），不需要在设置页
             让店长自己看到并意外打开一个还没准备好对外的模块。真要给某个客户开，直接改数据库
             /调用 PATCH /store-config，不通过这个界面。 */}
+
+        <label className="flex items-center gap-2 text-sm text-foreground">
+          <Switch
+            checked={config.showSpicyLevel}
+            onCheckedChange={(checked) => toggleFeature('showSpicyLevel', checked)}
+          />
+          在菜单上显示辣度（开启后，新增/编辑菜品时必须选择辣度等级）
+        </label>
+
+        <label className="flex items-center gap-2 text-sm text-foreground">
+          <Switch
+            checked={config.showAllergens}
+            onCheckedChange={(checked) => toggleFeature('showAllergens', checked)}
+          />
+          在菜单上显示过敏原（开启后，新增/编辑菜品时必须确认过敏原）
+        </label>
 
         <div className="flex flex-col gap-2">
           <p className="text-sm text-muted-foreground">界面主题（全店生效：顾客点餐页 / 厨房看板 / 前台）</p>
@@ -157,22 +166,6 @@ function StoreSettings({
             </div>
           </RadioGroup>
         </div>
-
-        <form onSubmit={setTabletPasscode} className="flex flex-col gap-2">
-          <p className="text-sm text-muted-foreground">
-            桌台平板开台密码（4 位数字，服务员现场选桌开台时用——只能重设，不能查看当前密码）
-          </p>
-          <div className="flex gap-2">
-            <Input
-              className="max-w-32"
-              placeholder="新的 4 位密码"
-              value={passcodeInput}
-              onChange={(e) => setPasscodeInput(e.target.value)}
-            />
-            <Button type="submit">设置开台密码</Button>
-          </div>
-          {passcodeSaved && <p className="text-sm text-foreground">已更新</p>}
-        </form>
       </CardContent>
     </Card>
   );
@@ -190,10 +183,19 @@ function ErrorBanner({ error }: { error: string | null }) {
 // 四个子面板都用同一个模式：run() 统一包一层，失败了报错显示在这个面板自己的 error 里，
 // 而不是像之前那样各写各的、大部分连 try/catch 都没有——deleteDish 那次报错在控制台里
 // 变成一条 Uncaught，界面上什么反馈都没有，就是因为漏了这层
-function MenuManagement() {
+const emptyDishDraft = {
+  name: '',
+  price: '',
+  spicyLevel: '',
+  allergens: [] as string[],
+  modifierGroupIds: [] as string[],
+};
+
+function MenuManagement({ config }: { config: StoreConfig }) {
   const [categories, setCategories] = useState<MenuCategory[]>([]);
+  const [modifierGroups, setModifierGroups] = useState<ModifierGroup[]>([]);
   const [newCategoryName, setNewCategoryName] = useState('');
-  const [newDish, setNewDish] = useState<Record<string, { name: string; price: string }>>({});
+  const [newDish, setNewDish] = useState<Record<string, typeof emptyDishDraft>>({});
   const [error, setError] = useState<string | null>(null);
   const [editingCategory, setEditingCategory] = useState<{ id: string; name: string; sortOrder: string } | null>(
     null,
@@ -203,11 +205,17 @@ function MenuManagement() {
     name: string;
     price: string;
     description: string;
+    spicyLevel: string;
+    allergens: string[];
+    modifierGroupIds: string[];
   } | null>(null);
 
   const load = () => api.get<MenuCategory[]>('/menu?includeUnavailable=true').then(setCategories).catch(() => {});
+  const loadModifierGroups = () =>
+    api.get<ModifierGroup[]>('/modifier-groups', 'staffToken').then(setModifierGroups).catch(() => {});
   useEffect(() => {
     load();
+    loadModifierGroups();
   }, []);
 
   async function run(action: () => Promise<void>) {
@@ -252,11 +260,26 @@ function MenuManagement() {
 
   async function addDish(categoryId: string, e: FormEvent) {
     e.preventDefault();
-    const draft = newDish[categoryId];
-    if (!draft?.name.trim() || !draft.price) return;
+    const draft = newDish[categoryId] ?? emptyDishDraft;
+    if (!draft.name.trim() || !draft.price) return;
+    if (config.showSpicyLevel && draft.spicyLevel === '') {
+      setError('已开启辣度显示，请为菜品选择辣度');
+      return;
+    }
     await run(async () => {
-      await api.post('/dishes', { categoryId, name: draft.name, price: Number(draft.price) }, 'staffToken');
-      setNewDish((prev) => ({ ...prev, [categoryId]: { name: '', price: '' } }));
+      await api.post(
+        '/dishes',
+        {
+          categoryId,
+          name: draft.name,
+          price: Number(draft.price),
+          spicyLevel: config.showSpicyLevel ? Number(draft.spicyLevel) : undefined,
+          allergens: config.showAllergens ? draft.allergens : undefined,
+          modifierGroupIds: draft.modifierGroupIds,
+        },
+        'staffToken',
+      );
+      setNewDish((prev) => ({ ...prev, [categoryId]: emptyDishDraft }));
     });
   }
 
@@ -269,12 +292,24 @@ function MenuManagement() {
   }
 
   function startEditDish(dish: Dish) {
-    setEditingDish({ id: dish.id, name: dish.name, price: String(dish.price), description: dish.description ?? '' });
+    setEditingDish({
+      id: dish.id,
+      name: dish.name,
+      price: String(dish.price),
+      description: dish.description ?? '',
+      spicyLevel: dish.spicyLevel === null ? '' : String(dish.spicyLevel),
+      allergens: dish.allergens,
+      modifierGroupIds: dish.modifierGroups.map((g) => g.id),
+    });
   }
 
   async function saveDish(dish: Dish, e: FormEvent) {
     e.preventDefault();
     if (!editingDish) return;
+    if (config.showSpicyLevel && editingDish.spicyLevel === '') {
+      setError('已开启辣度显示，请为菜品选择辣度');
+      return;
+    }
     await run(async () => {
       await api.put(
         `/dishes/${dish.id}`,
@@ -284,6 +319,9 @@ function MenuManagement() {
           price: Number(editingDish.price),
           description: editingDish.description || undefined,
           isAvailable: dish.isAvailable,
+          spicyLevel: config.showSpicyLevel ? Number(editingDish.spicyLevel) : undefined,
+          allergens: config.showAllergens ? editingDish.allergens : undefined,
+          modifierGroupIds: editingDish.modifierGroupIds,
         },
         'staffToken',
       );
@@ -292,6 +330,7 @@ function MenuManagement() {
   }
 
   return (
+    <div className="flex flex-col gap-4">
     <Card>
       <CardHeader>
         <CardTitle>菜单管理</CardTitle>
@@ -370,6 +409,25 @@ function MenuManagement() {
                               value={editingDish.description}
                               onChange={(e) => setEditingDish({ ...editingDish, description: e.target.value })}
                             />
+                            {config.showSpicyLevel && (
+                              <SpicySelect
+                                value={editingDish.spicyLevel}
+                                onChange={(v) => setEditingDish({ ...editingDish, spicyLevel: v })}
+                              />
+                            )}
+                            {config.showAllergens && (
+                              <AllergenCheckboxes
+                                value={editingDish.allergens}
+                                onChange={(v) => setEditingDish({ ...editingDish, allergens: v })}
+                              />
+                            )}
+                            {modifierGroups.length > 0 && (
+                              <ModifierGroupCheckboxes
+                                groups={modifierGroups}
+                                value={editingDish.modifierGroupIds}
+                                onChange={(v) => setEditingDish({ ...editingDish, modifierGroupIds: v })}
+                              />
+                            )}
                             <Button type="submit" size="sm">
                               保存
                             </Button>
@@ -385,9 +443,25 @@ function MenuManagement() {
                           {dish.name} · ¥{Number(dish.price).toFixed(2)}
                         </TableCell>
                         <TableCell>
-                          <Badge variant={dish.isAvailable ? 'secondary' : 'outline'}>
-                            {dish.isAvailable ? '在售' : '已下架'}
-                          </Badge>
+                          <div className="flex flex-wrap items-center gap-1.5">
+                            <Badge variant={dish.isAvailable ? 'secondary' : 'outline'}>
+                              {dish.isAvailable ? '在售' : '已下架'}
+                            </Badge>
+                            {config.showSpicyLevel && dish.spicyLevel !== null && dish.spicyLevel > 0 && (
+                              <Badge variant="outline">{'🌶️'.repeat(dish.spicyLevel)}</Badge>
+                            )}
+                            {config.showAllergens && dish.allergens.length > 0 && (
+                              <Badge variant="outline">
+                                含
+                                {dish.allergens
+                                  .map((id) => ALLERGEN_OPTIONS.find((a) => a.id === id)?.label ?? id)
+                                  .join('、')}
+                              </Badge>
+                            )}
+                            {dish.modifierGroups.length > 0 && (
+                              <Badge variant="outline">{dish.modifierGroups.map((g) => g.name).join('、')}</Badge>
+                            )}
+                          </div>
                         </TableCell>
                         <TableCell className="text-right">
                           <div className="flex justify-end gap-2">
@@ -408,7 +482,7 @@ function MenuManagement() {
                 </TableBody>
               </Table>
 
-              <form onSubmit={(e) => addDish(category.id, e)} className="flex flex-wrap gap-2">
+              <form onSubmit={(e) => addDish(category.id, e)} className="flex flex-wrap items-center gap-2">
                 <Input
                   placeholder="菜品名称"
                   className="max-w-40"
@@ -416,7 +490,7 @@ function MenuManagement() {
                   onChange={(e) =>
                     setNewDish((prev) => ({
                       ...prev,
-                      [category.id]: { name: e.target.value, price: prev[category.id]?.price ?? '' },
+                      [category.id]: { ...emptyDishDraft, ...prev[category.id], name: e.target.value },
                     }))
                   }
                 />
@@ -428,10 +502,44 @@ function MenuManagement() {
                   onChange={(e) =>
                     setNewDish((prev) => ({
                       ...prev,
-                      [category.id]: { name: prev[category.id]?.name ?? '', price: e.target.value },
+                      [category.id]: { ...emptyDishDraft, ...prev[category.id], price: e.target.value },
                     }))
                   }
                 />
+                {config.showSpicyLevel && (
+                  <SpicySelect
+                    value={newDish[category.id]?.spicyLevel ?? ''}
+                    onChange={(v) =>
+                      setNewDish((prev) => ({
+                        ...prev,
+                        [category.id]: { ...emptyDishDraft, ...prev[category.id], spicyLevel: v },
+                      }))
+                    }
+                  />
+                )}
+                {config.showAllergens && (
+                  <AllergenCheckboxes
+                    value={newDish[category.id]?.allergens ?? []}
+                    onChange={(v) =>
+                      setNewDish((prev) => ({
+                        ...prev,
+                        [category.id]: { ...emptyDishDraft, ...prev[category.id], allergens: v },
+                      }))
+                    }
+                  />
+                )}
+                {modifierGroups.length > 0 && (
+                  <ModifierGroupCheckboxes
+                    groups={modifierGroups}
+                    value={newDish[category.id]?.modifierGroupIds ?? []}
+                    onChange={(v) =>
+                      setNewDish((prev) => ({
+                        ...prev,
+                        [category.id]: { ...emptyDishDraft, ...prev[category.id], modifierGroupIds: v },
+                      }))
+                    }
+                  />
+                )}
                 <Button type="submit" size="sm">
                   加菜品
                 </Button>
@@ -441,18 +549,331 @@ function MenuManagement() {
         </div>
       </CardContent>
     </Card>
+    <ModifierGroupManagement groups={modifierGroups} onChanged={loadModifierGroups} />
+    </div>
+  );
+}
+
+function SpicySelect({ value, onChange }: { value: string; onChange: (value: string) => void }) {
+  return (
+    <Select value={value} onValueChange={onChange}>
+      <SelectTrigger size="sm" className="w-28">
+        <SelectValue placeholder="选择辣度" />
+      </SelectTrigger>
+      <SelectContent>
+        {SPICY_LEVEL_LABELS.map((label, level) => (
+          <SelectItem key={level} value={String(level)}>
+            {label}
+          </SelectItem>
+        ))}
+      </SelectContent>
+    </Select>
+  );
+}
+
+function AllergenCheckboxes({ value, onChange }: { value: string[]; onChange: (value: string[]) => void }) {
+  return (
+    <div className="flex flex-wrap items-center gap-2.5">
+      {ALLERGEN_OPTIONS.map((option) => (
+        <label key={option.id} className="flex items-center gap-1 text-xs text-muted-foreground">
+          <input
+            type="checkbox"
+            checked={value.includes(option.id)}
+            onChange={(e) =>
+              onChange(e.target.checked ? [...value, option.id] : value.filter((id) => id !== option.id))
+            }
+          />
+          {option.label}
+        </label>
+      ))}
+    </div>
+  );
+}
+
+function ModifierGroupCheckboxes({
+  groups,
+  value,
+  onChange,
+}: {
+  groups: ModifierGroup[];
+  value: string[];
+  onChange: (value: string[]) => void;
+}) {
+  return (
+    <div className="flex flex-wrap items-center gap-2.5">
+      {groups.map((group) => (
+        <label key={group.id} className="flex items-center gap-1 text-xs text-muted-foreground">
+          <input
+            type="checkbox"
+            checked={value.includes(group.id)}
+            onChange={(e) =>
+              onChange(e.target.checked ? [...value, group.id] : value.filter((id) => id !== group.id))
+            }
+          />
+          {group.name}
+        </label>
+      ))}
+    </div>
+  );
+}
+
+const SELECTION_TYPE_LABELS: Record<string, string> = {
+  single_required: '必选单选',
+  single_optional: '可选单选',
+  multiple: '可选多选',
+};
+
+type ModifierGroupDraft = {
+  name: string;
+  selectionType: 'single_required' | 'single_optional' | 'multiple';
+  options: { label: string; priceDelta: string }[];
+};
+
+const emptyModifierGroupDraft: ModifierGroupDraft = {
+  name: '',
+  selectionType: 'single_required',
+  options: [{ label: '', priceDelta: '' }],
+};
+
+// 门店级"选项组模板"管理（选面型、加料这类）：不预设内容，商家自己建，建好了在上面
+// 菜品管理的表单里勾选适用哪些菜（见 MenuManagement 里的 modifierGroupIds）
+function ModifierGroupManagement({ groups, onChanged }: { groups: ModifierGroup[]; onChanged: () => void }) {
+  const [error, setError] = useState<string | null>(null);
+  const [newGroup, setNewGroup] = useState<ModifierGroupDraft>(emptyModifierGroupDraft);
+  const [editingGroup, setEditingGroup] = useState<(ModifierGroupDraft & { id: string }) | null>(null);
+
+  async function run(action: () => Promise<void>) {
+    setError(null);
+    try {
+      await action();
+      onChanged();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : '操作失败');
+    }
+  }
+
+  function toPayload(draft: ModifierGroupDraft) {
+    return {
+      name: draft.name,
+      selectionType: draft.selectionType,
+      options: draft.options
+        .filter((o) => o.label.trim())
+        .map((o) => ({ label: o.label, priceDelta: o.priceDelta ? Number(o.priceDelta) : 0 })),
+    };
+  }
+
+  async function createGroup(e: FormEvent) {
+    e.preventDefault();
+    if (!newGroup.name.trim() || toPayload(newGroup).options.length === 0) {
+      setError('选项组名称和至少一个选项都不能为空');
+      return;
+    }
+    await run(async () => {
+      await api.post('/modifier-groups', toPayload(newGroup), 'staffToken');
+      setNewGroup(emptyModifierGroupDraft);
+    });
+  }
+
+  function startEditGroup(group: ModifierGroup) {
+    setEditingGroup({
+      id: group.id,
+      name: group.name,
+      selectionType: group.selectionType,
+      options: group.options.map((o) => ({ label: o.label, priceDelta: o.priceDelta })),
+    });
+  }
+
+  async function saveGroup(e: FormEvent) {
+    e.preventDefault();
+    if (!editingGroup) return;
+    if (!editingGroup.name.trim() || toPayload(editingGroup).options.length === 0) {
+      setError('选项组名称和至少一个选项都不能为空');
+      return;
+    }
+    await run(async () => {
+      await api.put(`/modifier-groups/${editingGroup.id}`, toPayload(editingGroup), 'staffToken');
+      setEditingGroup(null);
+    });
+  }
+
+  async function deleteGroup(id: string) {
+    await run(() => api.delete(`/modifier-groups/${id}`, 'staffToken'));
+  }
+
+  function OptionRows({
+    draft,
+    setDraft,
+  }: {
+    draft: ModifierGroupDraft;
+    setDraft: (d: ModifierGroupDraft) => void;
+  }) {
+    return (
+      <div className="flex flex-col gap-1.5">
+        {draft.options.map((option, index) => (
+          <div key={index} className="flex items-center gap-2">
+            <Input
+              placeholder="选项名称，比如「加鸡蛋」"
+              className="max-w-40"
+              value={option.label}
+              onChange={(e) => {
+                const options = draft.options.map((o, i) => (i === index ? { ...o, label: e.target.value } : o));
+                setDraft({ ...draft, options });
+              }}
+            />
+            <Input
+              placeholder="加价（可选，默认0）"
+              type="number"
+              className="w-32"
+              value={option.priceDelta}
+              onChange={(e) => {
+                const options = draft.options.map((o, i) => (i === index ? { ...o, priceDelta: e.target.value } : o));
+                setDraft({ ...draft, options });
+              }}
+            />
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              onClick={() => setDraft({ ...draft, options: draft.options.filter((_, i) => i !== index) })}
+            >
+              删除选项
+            </Button>
+          </div>
+        ))}
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          className="w-fit"
+          onClick={() => setDraft({ ...draft, options: [...draft.options, { label: '', priceDelta: '' }] })}
+        >
+          + 加一个选项
+        </Button>
+      </div>
+    );
+  }
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle>口味/加料选项组</CardTitle>
+      </CardHeader>
+      <CardContent className="flex flex-col gap-4">
+        <ErrorBanner error={error} />
+        <p className="text-sm text-muted-foreground">
+          先在这里建好选项组模板（比如"选面型""加料"），再去上面的菜单管理里勾选哪些菜适用。
+        </p>
+
+        <div className="flex flex-col gap-3">
+          {groups.map((group) =>
+            editingGroup?.id === group.id ? (
+              <form
+                key={group.id}
+                onSubmit={saveGroup}
+                className="flex flex-col gap-2 rounded-lg border border-border p-3"
+              >
+                <div className="flex flex-wrap items-center gap-2">
+                  <Input
+                    className="max-w-40"
+                    value={editingGroup.name}
+                    onChange={(e) => setEditingGroup({ ...editingGroup, name: e.target.value })}
+                  />
+                  <Select
+                    value={editingGroup.selectionType}
+                    onValueChange={(v) => setEditingGroup({ ...editingGroup, selectionType: v as ModifierGroupDraft['selectionType'] })}
+                  >
+                    <SelectTrigger size="sm" className="w-32">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {Object.entries(SELECTION_TYPE_LABELS).map(([value, label]) => (
+                        <SelectItem key={value} value={value}>
+                          {label}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <OptionRows draft={editingGroup} setDraft={(d) => setEditingGroup({ ...d, id: editingGroup.id })} />
+                <div className="flex gap-2">
+                  <Button type="submit" size="sm">
+                    保存
+                  </Button>
+                  <Button type="button" variant="ghost" size="sm" onClick={() => setEditingGroup(null)}>
+                    取消
+                  </Button>
+                </div>
+              </form>
+            ) : (
+              <div key={group.id} className="flex items-center justify-between rounded-lg border border-border p-3">
+                <div className="flex flex-col gap-1">
+                  <div className="flex items-center gap-2">
+                    <span className="text-sm font-medium text-foreground">{group.name}</span>
+                    <Badge variant="secondary">{SELECTION_TYPE_LABELS[group.selectionType]}</Badge>
+                  </div>
+                  <p className="text-xs text-muted-foreground">
+                    {group.options
+                      .map((o) => (Number(o.priceDelta) > 0 ? `${o.label}(+¥${o.priceDelta})` : o.label))
+                      .join('、')}
+                  </p>
+                </div>
+                <div className="flex gap-2">
+                  <Button variant="ghost" size="sm" onClick={() => startEditGroup(group)}>
+                    编辑
+                  </Button>
+                  <Button variant="ghost" size="sm" onClick={() => deleteGroup(group.id)}>
+                    删除
+                  </Button>
+                </div>
+              </div>
+            ),
+          )}
+        </div>
+
+        <form onSubmit={createGroup} className="flex flex-col gap-2 rounded-lg border border-dashed border-border p-3">
+          <div className="flex flex-wrap items-center gap-2">
+            <Input
+              placeholder="新选项组名称，比如「选面型」"
+              className="max-w-48"
+              value={newGroup.name}
+              onChange={(e) => setNewGroup({ ...newGroup, name: e.target.value })}
+            />
+            <Select
+              value={newGroup.selectionType}
+              onValueChange={(v) => setNewGroup({ ...newGroup, selectionType: v as ModifierGroupDraft['selectionType'] })}
+            >
+              <SelectTrigger size="sm" className="w-32">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {Object.entries(SELECTION_TYPE_LABELS).map(([value, label]) => (
+                  <SelectItem key={value} value={value}>
+                    {label}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+          <OptionRows draft={newGroup} setDraft={setNewGroup} />
+          <Button type="submit" size="sm" className="w-fit">
+            新增选项组
+          </Button>
+        </form>
+      </CardContent>
+    </Card>
   );
 }
 
 function TableManagement() {
   const [tables, setTables] = useState<TableWithSession[]>([]);
-  const [form, setForm] = useState({ tableNumber: '', capacity: '2', zone: '' });
+  const [form, setForm] = useState({ tableNumber: '', capacity: '2', zone: '', passcode: '' });
   const [error, setError] = useState<string | null>(null);
   const [editingTable, setEditingTable] = useState<{
     id: string;
     tableNumber: string;
     capacity: string;
     zone: string;
+    passcode: string;
   } | null>(null);
 
   const load = () => api.get<TableWithSession[]>('/tables', 'staffToken').then(setTables).catch(() => {});
@@ -473,13 +894,22 @@ function TableManagement() {
   async function addTable(e: FormEvent) {
     e.preventDefault();
     if (!form.tableNumber.trim()) return;
+    if (!/^\d{4}$/.test(form.passcode)) {
+      setError('开台密码必须是 4 位数字');
+      return;
+    }
     await run(async () => {
       await api.post(
         '/tables',
-        { tableNumber: form.tableNumber, capacity: Number(form.capacity), zone: form.zone || undefined },
+        {
+          tableNumber: form.tableNumber,
+          capacity: Number(form.capacity),
+          zone: form.zone || undefined,
+          passcode: form.passcode,
+        },
         'staffToken',
       );
-      setForm({ tableNumber: '', capacity: '2', zone: '' });
+      setForm({ tableNumber: '', capacity: '2', zone: '', passcode: '' });
     });
   }
 
@@ -493,12 +923,17 @@ function TableManagement() {
       tableNumber: table.tableNumber,
       capacity: String(table.capacity),
       zone: table.zone ?? '',
+      passcode: table.passcode,
     });
   }
 
   async function saveTable(e: FormEvent) {
     e.preventDefault();
     if (!editingTable) return;
+    if (!/^\d{4}$/.test(editingTable.passcode)) {
+      setError('开台密码必须是 4 位数字');
+      return;
+    }
     await run(async () => {
       await api.put(
         `/tables/${editingTable.id}`,
@@ -506,6 +941,7 @@ function TableManagement() {
           tableNumber: editingTable.tableNumber,
           capacity: Number(editingTable.capacity),
           zone: editingTable.zone || undefined,
+          passcode: editingTable.passcode,
         },
         'staffToken',
       );
@@ -545,6 +981,12 @@ function TableManagement() {
                         value={editingTable.zone}
                         onChange={(e) => setEditingTable({ ...editingTable, zone: e.target.value })}
                       />
+                      <Input
+                        className="w-24"
+                        placeholder="开台密码"
+                        value={editingTable.passcode}
+                        onChange={(e) => setEditingTable({ ...editingTable, passcode: e.target.value })}
+                      />
                       <Button type="submit" size="sm">
                         保存
                       </Button>
@@ -558,7 +1000,7 @@ function TableManagement() {
                 <TableRow key={table.id}>
                   <TableCell>
                     {table.tableNumber}（{table.capacity} 人
-                    {table.zone ? ` · ${table.zone}` : ''} · {table.status}）
+                    {table.zone ? ` · ${table.zone}` : ''} · {table.status} · 密码 {table.passcode}）
                   </TableCell>
                   <TableCell className="text-right">
                     <div className="flex justify-end gap-2">
@@ -600,6 +1042,12 @@ function TableManagement() {
             className="max-w-40"
             value={form.zone}
             onChange={(e) => setForm({ ...form, zone: e.target.value })}
+          />
+          <Input
+            placeholder="开台密码（4位数字）"
+            className="w-32"
+            value={form.passcode}
+            onChange={(e) => setForm({ ...form, passcode: e.target.value })}
           />
           <Button type="submit">新增桌台</Button>
         </form>

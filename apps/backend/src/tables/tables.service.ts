@@ -3,7 +3,6 @@ import { JwtService } from '@nestjs/jwt';
 import { randomUUID } from 'crypto';
 import { PrismaService } from '../prisma/prisma.service';
 import { RealtimeGateway } from '../realtime/realtime.gateway';
-import { StoreConfigService } from '../store-config/store-config.service';
 import { OpenTableSessionDto } from './dto/open-table-session.dto';
 import { MergeTableSessionDto } from './dto/merge-table-session.dto';
 import { UpsertTableDto } from './dto/upsert-table.dto';
@@ -17,7 +16,6 @@ export class TablesService {
     private readonly prisma: PrismaService,
     private readonly jwtService: JwtService,
     private readonly realtime: RealtimeGateway,
-    private readonly storeConfigService: StoreConfigService,
   ) {}
 
   // 前台桌台看板：每张桌台 + 如果占用中，带出当前会话和账单
@@ -48,16 +46,27 @@ export class TablesService {
     });
   }
 
-  createTable(dto: UpsertTableDto) {
-    return this.prisma.table.create({ data: { tableNumber: dto.tableNumber, capacity: dto.capacity, zone: dto.zone } });
+  private async assertPasscodeFree(passcode: string, excludeId?: string) {
+    const clash = await this.prisma.table.findUnique({ where: { passcode } });
+    if (clash && clash.id !== excludeId) {
+      throw new ConflictException(`该密码已被桌台 ${clash.tableNumber} 使用`);
+    }
+  }
+
+  async createTable(dto: UpsertTableDto) {
+    await this.assertPasscodeFree(dto.passcode);
+    return this.prisma.table.create({
+      data: { tableNumber: dto.tableNumber, capacity: dto.capacity, zone: dto.zone, passcode: dto.passcode },
+    });
   }
 
   async updateTable(id: string, dto: UpsertTableDto) {
     const table = await this.prisma.table.findUnique({ where: { id } });
     if (!table) throw new NotFoundException('桌台不存在');
+    await this.assertPasscodeFree(dto.passcode, id);
     return this.prisma.table.update({
       where: { id },
-      data: { tableNumber: dto.tableNumber, capacity: dto.capacity, zone: dto.zone },
+      data: { tableNumber: dto.tableNumber, capacity: dto.capacity, zone: dto.zone, passcode: dto.passcode },
     });
   }
 
@@ -271,12 +280,24 @@ export class TablesService {
     return { sessionToken: token, orderId: session.order!.id, tableNumber };
   }
 
-  // 桌台平板（流动、店员现场选桌）开台：先校验全店统一的开台密码，通过了就直接复用
-  // joinOrAutoOpen 这同一套建会话逻辑——不重新实现一遍开台，跟顾客扫码 join 走的是
-  // 同一个底层方法，只是这里多了一道密码校验、并且 partySize 是必填（服务员现场选的）
-  async tabletOpen(tableId: string, partySize: number, passcode: string) {
-    const valid = await this.storeConfigService.verifyTabletPasscode(passcode);
-    if (!valid) throw new ForbiddenException('开台密码不正确');
+  // 桌台平板输密码后的第一步：凭密码直接定位到是哪张桌，不管这张桌当前是空闲还是已被占用
+  // （前台可能已经开台了）——平板端拿到 status 后自己决定要不要问人数
+  async resolveByPasscode(passcode: string) {
+    const table = await this.prisma.table.findUnique({
+      where: { passcode },
+      select: { id: true, tableNumber: true, capacity: true, zone: true, status: true },
+    });
+    if (!table) throw new NotFoundException('密码不正确');
+    return table;
+  }
+
+  // 桌台平板（流动、店员现场选桌）开台：校验的是这张桌自己的密码（不再是全店统一密码），
+  // 通过了就直接复用 joinOrAutoOpen 这同一套建会话逻辑——不重新实现一遍开台，跟顾客扫码
+  // join 走的是同一个底层方法，只是这里多了一道密码校验
+  async tabletOpen(tableId: string, partySize: number | undefined, passcode: string) {
+    const table = await this.prisma.table.findUnique({ where: { id: tableId } });
+    if (!table) throw new NotFoundException('桌台不存在');
+    if (table.passcode !== passcode) throw new ForbiddenException('开台密码不正确');
     return this.joinOrAutoOpen(tableId, partySize);
   }
 }

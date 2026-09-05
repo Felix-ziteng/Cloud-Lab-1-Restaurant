@@ -21,6 +21,11 @@ class OrderItemInput {
   @IsOptional()
   @IsString()
   notes?: string;
+
+  @IsOptional()
+  @IsArray()
+  @IsString({ each: true })
+  selectedOptionIds?: string[];
 }
 
 export class CreateOrderDto {

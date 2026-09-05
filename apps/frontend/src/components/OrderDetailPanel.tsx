@@ -156,6 +156,34 @@ export default function OrderDetailPanel({ table, allTables, isManager, onChange
     });
   }
 
+  async function mergeTables() {
+    if (!table.activeSession) return;
+    const idleTables = allTables.filter((t) => t.status === 'idle');
+    if (idleTables.length === 0) {
+      setError('没有空闲的桌台可以并进来');
+      return;
+    }
+    const options = idleTables.map((t) => t.tableNumber).join('、');
+    const input = window.prompt(`要并进来哪些桌？可选：${options}（多个用顿号/逗号分隔）`);
+    if (!input) return;
+    const wanted = input
+      .split(/[,，、\s]+/)
+      .map((s) => s.trim())
+      .filter(Boolean);
+    const toMerge = idleTables.filter((t) => wanted.includes(t.tableNumber));
+    if (toMerge.length === 0) {
+      setError('没有匹配到有效的空闲桌台');
+      return;
+    }
+    await run(async () => {
+      await api.post(
+        `/table-sessions/${table.activeSession!.id}/merge`,
+        { additionalTableIds: toMerge.map((t) => t.id) },
+        'staffToken',
+      );
+    });
+  }
+
   async function transferTable() {
     if (!table.activeSession) return;
     const idleTables = allTables.filter((t) => t.status === 'idle');
@@ -227,6 +255,9 @@ export default function OrderDetailPanel({ table, allTables, isManager, onChange
           <Button variant="outline" size="sm" onClick={transferTable}>
             换桌
           </Button>
+          <Button variant="outline" size="sm" onClick={mergeTables}>
+            并台
+          </Button>
           {sessionTables.length > 1 &&
             sessionTables.map((t) => (
               <Button key={t.id} variant="outline" size="sm" onClick={() => unmergeTable(t.id)}>
@@ -244,6 +275,11 @@ export default function OrderDetailPanel({ table, allTables, isManager, onChange
                 <p className="font-medium text-foreground">
                   {item.dishNameSnapshot} × {item.quantity}
                 </p>
+                {item.selectedModifiers && item.selectedModifiers.length > 0 && (
+                  <p className="text-xs text-muted-foreground">
+                    {item.selectedModifiers.map((m) => m.optionLabel).join(' · ')}
+                  </p>
+                )}
                 <p className="text-muted-foreground">
                   ¥{(Number(item.unitPriceSnapshot) * item.quantity).toFixed(2)}
                 </p>

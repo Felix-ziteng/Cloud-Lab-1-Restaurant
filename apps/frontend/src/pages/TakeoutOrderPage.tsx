@@ -2,6 +2,7 @@ import { useEffect, useState, type FormEvent } from 'react';
 import { useNavigate } from 'react-router-dom';
 import type { GuestOrderCreated, MenuCategory, StoreConfig } from '@restaurant/shared-types';
 import { api, setToken } from '../api/client';
+import DishTasteTags from '../components/DishTasteTags';
 
 // 图片占位图标：菜品还没有真实图片素材时的通用占位，不用 emoji（跟 GuestOrderPage 共用同一个画法，
 // 保持顾客侧两个点餐入口视觉一致——这里没有拆成共享组件，两处各画一份，图标本身极简，重复成本很低）
@@ -188,6 +189,7 @@ export default function TakeoutOrderPage() {
                           {dish.description}
                         </span>
                       )}
+                      <DishTasteTags dish={dish} config={config} />
                       <div className="mt-1 font-['Baloo_2',system-ui,sans-serif] text-[17px] font-bold text-[oklch(58%_0.2_35)]">
                         ¥{Number(dish.price).toFixed(2)}
                       </div>

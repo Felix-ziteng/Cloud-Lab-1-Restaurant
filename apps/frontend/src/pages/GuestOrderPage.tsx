@@ -1,9 +1,12 @@
 import { useEffect, useRef, useState } from 'react';
 import { useParams } from 'react-router-dom';
+import type { Dish, StoreConfig } from '@restaurant/shared-types';
 import { api, setToken } from '../api/client';
 import { RealtimeProvider, RealtimeListener } from '../realtime/RealtimeContext';
 import { useTableOrder } from '../hooks/useTableOrder';
 import { Badge } from '@/components/ui/badge';
+import DishTasteTags from '../components/DishTasteTags';
+import DishModifierSheet from '../components/DishModifierSheet';
 
 const STATUS_BADGE_CLASS: Record<string, string> = {
   pending: 'bg-status-pending text-status-pending-foreground',
@@ -53,6 +56,8 @@ export default function GuestOrderPage() {
   const [orderId, setOrderId] = useState<string | null>(null);
   const [tableNumber, setTableNumber] = useState<string | null>(null);
   const [joinError, setJoinError] = useState<string | null>(null);
+  const [config, setConfig] = useState<StoreConfig | null>(null);
+  const [selectingDish, setSelectingDish] = useState<Dish | null>(null);
   // StrictMode 开发模式下同一个 effect 会故意触发两次；join 不是纯读操作（会在桌台空闲时建会话），
   // 这个 ref 保证一次页面访问只真正 join 一次，不产生两个 token 互相覆盖 localStorage 的问题
   const joinedRef = useRef(false);
@@ -83,8 +88,26 @@ export default function GuestOrderPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tableId]);
 
-  const { menu, activeCategory, setActiveCategoryId, order, cart, addToCart, submitCart, requestCheckout, cartTotal, error, busy, refreshOrder } =
-    useTableOrder({ orderId, tokenKind });
+  useEffect(() => {
+    api.get<StoreConfig>('/store-config').then(setConfig).catch(() => {});
+  }, []);
+
+  const {
+    menu,
+    activeCategory,
+    setActiveCategoryId,
+    order,
+    cart,
+    addToCart,
+    decrementSimpleLine,
+    cartQuantityForDish,
+    submitCart,
+    requestCheckout,
+    cartTotal,
+    error,
+    busy,
+    refreshOrder,
+  } = useTableOrder({ orderId, tokenKind });
 
   const displayError = joinError ?? error;
 
@@ -153,7 +176,8 @@ export default function GuestOrderPage() {
 
             <div className="flex flex-col gap-3.5">
               {activeCategory?.dishes?.map((dish) => {
-                const qty = cart[dish.id] ?? 0;
+                const hasModifiers = dish.modifierGroups.length > 0;
+                const qty = cartQuantityForDish(dish.id);
                 return (
                   <div
                     key={dish.id}
@@ -169,25 +193,29 @@ export default function GuestOrderPage() {
                           {dish.description}
                         </span>
                       )}
+                      <DishTasteTags dish={dish} config={config} />
                       <div className="mt-1 font-['Baloo_2',system-ui,sans-serif] text-[17px] font-bold text-[oklch(58%_0.2_35)]">
                         ¥{Number(dish.price).toFixed(2)}
                       </div>
                     </div>
                     <div className="flex shrink-0 items-center gap-2">
-                      {qty > 0 && (
+                      {!hasModifiers && qty > 0 && (
                         <button
                           type="button"
-                          onClick={() => addToCart(dish.id, -1)}
+                          onClick={() => decrementSimpleLine(dish.id)}
                           className="flex size-7 items-center justify-center rounded-full bg-[oklch(94%_0.01_40)] text-base font-bold text-[oklch(45%_0.02_30)]"
                         >
                           −
                         </button>
                       )}
-                      {qty > 0 && <span className="min-w-3.5 text-center text-sm font-bold">{qty}</span>}
-                      {qty > 0 ? (
+                      {!hasModifiers && qty > 0 && <span className="min-w-3.5 text-center text-sm font-bold">{qty}</span>}
+                      {hasModifiers && qty > 0 && (
+                        <span className="text-xs font-bold text-[oklch(55%_0.02_30)]">已加 {qty} 份</span>
+                      )}
+                      {!hasModifiers && qty > 0 ? (
                         <button
                           type="button"
-                          onClick={() => addToCart(dish.id, 1)}
+                          onClick={() => addToCart(dish.id)}
                           className="flex size-7 items-center justify-center rounded-full bg-[oklch(60%_0.21_35)] text-base font-bold text-white"
                         >
                           +
@@ -195,10 +223,10 @@ export default function GuestOrderPage() {
                       ) : (
                         <button
                           type="button"
-                          onClick={() => addToCart(dish.id, 1)}
+                          onClick={() => (hasModifiers ? setSelectingDish(dish) : addToCart(dish.id))}
                           className="rounded-full bg-[oklch(90%_0.05_45)] px-4 py-1.5 text-[13px] font-bold text-[oklch(45%_0.18_35)]"
                         >
-                          加入
+                          {hasModifiers ? '选规格' : '加入'}
                         </button>
                       )}
                     </div>
@@ -215,9 +243,16 @@ export default function GuestOrderPage() {
                 <ul className="flex flex-col gap-2">
                   {order.items.map((item) => (
                     <li key={item.id} className="flex items-center justify-between gap-3 text-sm">
-                      <span>
-                        {item.dishNameSnapshot} × {item.quantity}
-                      </span>
+                      <div>
+                        <span>
+                          {item.dishNameSnapshot} × {item.quantity}
+                        </span>
+                        {item.selectedModifiers && item.selectedModifiers.length > 0 && (
+                          <p className="text-xs text-[oklch(55%_0.02_30)]">
+                            {item.selectedModifiers.map((m) => m.optionLabel).join(' · ')}
+                          </p>
+                        )}
+                      </div>
                       {item.roundNumber === 0 ? (
                         <Badge variant="secondary">未提交</Badge>
                       ) : (
@@ -248,7 +283,7 @@ export default function GuestOrderPage() {
           </div>
         </div>
 
-        {Object.keys(cart).length > 0 && (
+        {cart.length > 0 && (
           <div className="fixed inset-x-0 bottom-0 rounded-t-[24px] bg-[oklch(18%_0.01_30)] px-5 py-4">
             <div className="mx-auto flex max-w-md items-center justify-between gap-4">
               <div>
@@ -267,6 +302,17 @@ export default function GuestOrderPage() {
               </button>
             </div>
           </div>
+        )}
+
+        {selectingDish && (
+          <DishModifierSheet
+            dish={selectingDish}
+            onCancel={() => setSelectingDish(null)}
+            onConfirm={(selectedOptionIds) => {
+              addToCart(selectingDish.id, selectedOptionIds);
+              setSelectingDish(null);
+            }}
+          />
         )}
       </div>
     </RealtimeProvider>

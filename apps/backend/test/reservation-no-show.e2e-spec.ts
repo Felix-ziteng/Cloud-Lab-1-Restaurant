@@ -119,7 +119,7 @@ describe('预定标记未到 (e2e，暂无前端入口，仅接口层验证)', (
   it('已经到店的预定不能再标记为未到', async () => {
     const reservation = await createReservation();
     const table = await prisma.table.create({
-      data: { tableNumber: `E2E-NOSHOW-${Date.now()}`, capacity: 2, status: 'idle' },
+      data: { tableNumber: `E2E-NOSHOW-${Date.now()}`, capacity: 2, status: 'idle', passcode: '6001' },
     });
     tableId = table.id;
 

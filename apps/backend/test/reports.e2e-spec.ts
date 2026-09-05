@@ -124,7 +124,7 @@ describe('经营概览报表 (e2e)', () => {
         .set('Authorization', `Bearer ${managerToken}`);
 
       const table = await prisma.table.create({
-        data: { tableNumber: `E2E-RPT-${Date.now()}`, capacity: 2, status: 'idle' },
+        data: { tableNumber: `E2E-RPT-${Date.now()}`, capacity: 2, status: 'idle', passcode: '6002' },
       });
       tableId = table.id;
       const joinRes = await request(server).post(`/api/table-sessions/${table.id}/join`).send({ partySize: 2 });
