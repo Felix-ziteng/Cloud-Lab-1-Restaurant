@@ -100,6 +100,8 @@ export default function GuestOrderPage() {
     cart,
     addToCart,
     decrementSimpleLine,
+    updateLineQuantity,
+    lineUnitPrice,
     cartQuantityForDish,
     submitCart,
     requestCheckout,
@@ -108,6 +110,17 @@ export default function GuestOrderPage() {
     busy,
     refreshOrder,
   } = useTableOrder({ orderId, tokenKind });
+
+  // 购物车（还没提交）和本桌已点（已提交给厨房）分 Tab 展示，不再堆在同一个区块里。
+  // 默认选中哪个 Tab 的逻辑见 TabletOrderingCompact.tsx 里的同名注释
+  const [activeTab, setActiveTab] = useState<'cart' | 'ordered'>('cart');
+  const initialTabSet = useRef(false);
+  useEffect(() => {
+    if (initialTabSet.current || !order) return;
+    initialTabSet.current = true;
+    if (cart.length === 0 && order.items.length > 0) setActiveTab('ordered');
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [order]);
 
   const displayError = joinError ?? error;
 
@@ -235,55 +248,123 @@ export default function GuestOrderPage() {
               })}
             </div>
 
-            <div className="flex flex-col gap-2 border-t border-[oklch(90%_0.01_40)] pt-4">
-              <h2 className="text-sm font-bold text-[oklch(45%_0.02_30)]">本桌已点</h2>
-              {order.items.length === 0 ? (
-                <p className="text-sm text-[oklch(55%_0.02_30)]">还没有点菜</p>
-              ) : (
-                <ul className="flex flex-col gap-2">
-                  {order.items.map((item) => (
-                    <li key={item.id} className="flex items-center justify-between gap-3 text-sm">
-                      <div>
-                        <span>
-                          {item.dishNameSnapshot} × {item.quantity}
-                        </span>
-                        {item.selectedModifiers && item.selectedModifiers.length > 0 && (
-                          <p className="text-xs text-[oklch(55%_0.02_30)]">
-                            {item.selectedModifiers.map((m) => m.optionLabel).join(' · ')}
-                          </p>
-                        )}
-                      </div>
-                      {item.roundNumber === 0 ? (
-                        <Badge variant="secondary">未提交</Badge>
-                      ) : (
-                        <Badge className={STATUS_BADGE_CLASS[item.kitchenStatus]}>
-                          {KITCHEN_STATUS_LABEL[item.kitchenStatus]}
-                        </Badge>
-                      )}
-                    </li>
-                  ))}
-                </ul>
-              )}
-              <div className="flex items-center justify-between pt-1 text-sm font-bold">
-                <span>合计</span>
-                <span>¥{Number(order.total).toFixed(2)}</span>
+            <div className="flex flex-col gap-3 border-t border-[oklch(90%_0.01_40)] pt-4">
+              <div className="flex gap-2">
+                <button
+                  type="button"
+                  onClick={() => setActiveTab('cart')}
+                  className={
+                    activeTab === 'cart'
+                      ? "rounded-full bg-[oklch(60%_0.21_35)] px-4 py-1.5 font-['Baloo_2',system-ui,sans-serif] text-sm font-bold text-white"
+                      : "rounded-full bg-[oklch(94%_0.01_40)] px-4 py-1.5 font-['Baloo_2',system-ui,sans-serif] text-sm font-bold text-[oklch(45%_0.02_30)]"
+                  }
+                >
+                  购物车 ({cart.reduce((s, l) => s + l.quantity, 0)})
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setActiveTab('ordered')}
+                  className={
+                    activeTab === 'ordered'
+                      ? "rounded-full bg-[oklch(60%_0.21_35)] px-4 py-1.5 font-['Baloo_2',system-ui,sans-serif] text-sm font-bold text-white"
+                      : "rounded-full bg-[oklch(94%_0.01_40)] px-4 py-1.5 font-['Baloo_2',system-ui,sans-serif] text-sm font-bold text-[oklch(45%_0.02_30)]"
+                  }
+                >
+                  本桌已点 ({order.items.length})
+                </button>
               </div>
-            </div>
 
-            {order.status === 'open' && order.items.some((i) => i.roundNumber > 0) && (
-              <button
-                type="button"
-                onClick={requestCheckout}
-                disabled={busy}
-                className="rounded-full border-2 border-[oklch(60%_0.21_35)] py-2.5 text-sm font-bold text-[oklch(50%_0.2_35)] disabled:opacity-50"
-              >
-                结账
-              </button>
-            )}
+              {activeTab === 'cart' ? (
+                cart.length === 0 ? (
+                  <p className="text-sm text-[oklch(55%_0.02_30)]">购物车还没有东西，去上面点几样吧</p>
+                ) : (
+                  <ul className="flex flex-col gap-2">
+                    {cart.map((line) => {
+                      const dish = menu.flatMap((c) => c.dishes).find((d) => d.id === line.dishId);
+                      if (!dish) return null;
+                      const optionLabels = dish.modifierGroups
+                        .flatMap((g) => g.options)
+                        .filter((o) => line.selectedOptionIds.includes(o.id))
+                        .map((o) => o.label);
+                      return (
+                        <li key={line.lineId} className="flex items-center justify-between gap-3 text-sm">
+                          <div>
+                            <span className="font-bold">{dish.name}</span>
+                            {optionLabels.length > 0 && (
+                              <p className="text-xs text-[oklch(55%_0.02_30)]">{optionLabels.join(' · ')}</p>
+                            )}
+                            <p className="text-xs text-[oklch(50%_0.02_40)]">¥{lineUnitPrice(line).toFixed(2)} × {line.quantity}</p>
+                          </div>
+                          <div className="flex items-center gap-2">
+                            <button
+                              type="button"
+                              onClick={() => updateLineQuantity(line.lineId, -1)}
+                              className="flex size-7 items-center justify-center rounded-full bg-[oklch(94%_0.01_40)] text-base font-bold text-[oklch(45%_0.02_30)]"
+                            >
+                              −
+                            </button>
+                            <span className="min-w-3.5 text-center text-sm font-bold">{line.quantity}</span>
+                            <button
+                              type="button"
+                              onClick={() => updateLineQuantity(line.lineId, 1)}
+                              className="flex size-7 items-center justify-center rounded-full bg-[oklch(60%_0.21_35)] text-base font-bold text-white"
+                            >
+                              +
+                            </button>
+                          </div>
+                        </li>
+                      );
+                    })}
+                  </ul>
+                )
+              ) : order.items.length === 0 ? (
+                <p className="text-sm text-[oklch(55%_0.02_30)]">这桌还没有已提交的菜</p>
+              ) : (
+                <>
+                  <ul className="flex flex-col gap-2">
+                    {order.items.map((item) => (
+                      <li key={item.id} className="flex items-center justify-between gap-3 text-sm">
+                        <div>
+                          <span>
+                            {item.dishNameSnapshot} × {item.quantity}
+                          </span>
+                          {item.selectedModifiers && item.selectedModifiers.length > 0 && (
+                            <p className="text-xs text-[oklch(55%_0.02_30)]">
+                              {item.selectedModifiers.map((m) => m.optionLabel).join(' · ')}
+                            </p>
+                          )}
+                        </div>
+                        {item.roundNumber === 0 ? (
+                          <Badge variant="secondary">未提交</Badge>
+                        ) : (
+                          <Badge className={STATUS_BADGE_CLASS[item.kitchenStatus]}>
+                            {KITCHEN_STATUS_LABEL[item.kitchenStatus]}
+                          </Badge>
+                        )}
+                      </li>
+                    ))}
+                  </ul>
+                  <div className="flex items-center justify-between pt-1 text-sm font-bold">
+                    <span>合计</span>
+                    <span>¥{Number(order.total).toFixed(2)}</span>
+                  </div>
+                  {order.status === 'open' && order.items.some((i) => i.roundNumber > 0) && (
+                    <button
+                      type="button"
+                      onClick={requestCheckout}
+                      disabled={busy}
+                      className="rounded-full border-2 border-[oklch(60%_0.21_35)] py-2.5 text-sm font-bold text-[oklch(50%_0.2_35)] disabled:opacity-50"
+                    >
+                      结账
+                    </button>
+                  )}
+                </>
+              )}
+            </div>
           </div>
         </div>
 
-        {cart.length > 0 && (
+        {activeTab === 'cart' && cart.length > 0 && (
           <div className="fixed inset-x-0 bottom-0 rounded-t-[24px] bg-[oklch(18%_0.01_30)] px-5 py-4">
             <div className="mx-auto flex max-w-md items-center justify-between gap-4">
               <div>
