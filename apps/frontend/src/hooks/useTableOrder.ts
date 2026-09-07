@@ -1,48 +1,52 @@
-import { useCallback, useEffect, useState } from 'react';
-import type { MenuCategory, OrderDetail } from '@restaurant/shared-types';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import type { MenuCategory, OrderDetail, OrderItem } from '@restaurant/shared-types';
 import { api } from '../api/client';
-
-// 购物车里的一条线：同一道菜、不同选项组合（比如"加鸡蛋"和"不加鸡蛋"）算两条独立的线，
-// 不能只用 dishId 当 key 合并数量——否则没法区分数量分别属于哪种选项组合
-export interface CartLine {
-  lineId: string; // 纯前端本地 key（crypto.randomUUID()），提交时不会用到
-  dishId: string;
-  quantity: number;
-  selectedOptionIds: string[];
-}
-
-// 不用 crypto.randomUUID()：平板/顾客手机都是通过局域网 IP 走明文 HTTP 访问（不是
-// localhost/HTTPS），不是"安全上下文"，Web Crypto API 在这种环境下不可用
-let lineIdCounter = 0;
-function generateLineId() {
-  lineIdCounter += 1;
-  return `line-${Date.now()}-${lineIdCounter}-${Math.random().toString(36).slice(2, 8)}`;
-}
-
-function sameSelection(a: string[], b: string[]) {
-  if (a.length !== b.length) return false;
-  const sortedA = [...a].sort();
-  const sortedB = [...b].sort();
-  return sortedA.every((id, i) => id === sortedB[i]);
-}
 
 // 手机扫码点餐（GuestOrderPage）和桌台平板点餐（紧凑/长菜单两种布局）共用的下单逻辑：
 // 拉菜单、购物车状态、加菜/提交/结账、订单刷新。三处只有 JSX 展示层不一样，业务逻辑
 // 不重复维护——谁调用这个 hook，谁负责"怎么先拿到 orderId"（手机是扫码 join，
 // 平板是选桌+密码 tablet-open），也负责用 RealtimeProvider/RealtimeListener 接实时刷新
 // （这个 hook 本身不碰 Context，只提供 refreshOrder 给调用方的 RealtimeListener 用）。
+//
+// 购物车不是本地状态：它就是 order.items 里 submittedAt 为 null 的那些项（"本桌已点"是
+// submittedAt 不为 null 的那些）。每次加/减/删都是一次真实的后端请求（addItems/
+// updateItemQuantity/removeItem，这几个接口本来就是给店员前台"加菜"用的，现在顾客/平板
+// 点餐也复用），后端改动后会通过 realtime 广播给同一桌的所有设备——所以购物车天然是
+// "这一桌共享的"，手机加的菜平板能直接看到、改数量、删掉，任何一台设备提交都会把这一桌
+// 当前所有未提交的项一起提交。这是产品决策（2026-09-07 跟用户确认过），不是 bug。
 export function useTableOrder({ orderId, tokenKind }: { orderId: string | null; tokenKind: string }) {
   const [menu, setMenu] = useState<MenuCategory[]>([]);
   const [activeCategoryId, setActiveCategoryId] = useState<string | null>(null);
   const [order, setOrder] = useState<OrderDetail | null>(null);
-  const [cart, setCart] = useState<CartLine[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [flashItemIds, setFlashItemIds] = useState<Set<string>>(new Set());
+
+  // 上一次刷新时"未提交项 id -> 数量"的快照，用来判断这次刷新里哪些项是新增/加量的，
+  // 给这些行加一下高亮动效——不区分是不是自己这台设备刚做的操作，自己操作完刷新到
+  // 结果时也会有一下确认闪烁，逻辑统一、不用额外判断"这个变化是谁触发的"
+  const prevQuantitiesRef = useRef<Map<string, number>>(new Map());
+  const flashTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const refreshOrder = useCallback(async () => {
     if (!orderId) return;
     const detail = await api.get<OrderDetail>(`/orders/${orderId}`, tokenKind);
+    const prev = prevQuantitiesRef.current;
+    const next = new Map<string, number>();
+    const changed = new Set<string>();
+    for (const item of detail.items) {
+      if (item.submittedAt !== null || item.isVoided) continue;
+      next.set(item.id, item.quantity);
+      const prevQty = prev.get(item.id);
+      if (prevQty === undefined || item.quantity > prevQty) changed.add(item.id);
+    }
+    prevQuantitiesRef.current = next;
     setOrder(detail);
+    if (changed.size > 0) {
+      setFlashItemIds(changed);
+      if (flashTimerRef.current) clearTimeout(flashTimerRef.current);
+      flashTimerRef.current = setTimeout(() => setFlashItemIds(new Set()), 700);
+    }
   }, [orderId, tokenKind]);
 
   useEffect(() => {
@@ -58,55 +62,111 @@ export function useTableOrder({ orderId, tokenKind }: { orderId: string | null; 
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [orderId]);
 
+  const cartItems = order ? order.items.filter((i) => i.submittedAt === null && !i.isVoided) : [];
+  const orderedItems = order ? order.items.filter((i) => i.submittedAt !== null && !i.isVoided) : [];
+
+  function optionLabelsOf(item: Pick<OrderItem, 'selectedModifiers'>): string[] {
+    return (item.selectedModifiers ?? []).map((m) => m.optionLabel).sort();
+  }
+
+  function resolveSelectedLabels(dishId: string, selectedOptionIds: string[]): string[] {
+    const dish = menu.flatMap((c) => c.dishes).find((d) => d.id === dishId);
+    if (!dish) return [];
+    return dish.modifierGroups
+      .flatMap((g) => g.options)
+      .filter((o) => selectedOptionIds.includes(o.id))
+      .map((o) => o.label)
+      .sort();
+  }
+
+  function sameLabels(a: string[], b: string[]) {
+    return a.length === b.length && a.every((label, i) => label === b[i]);
+  }
+
   // 加一份：没有选项的菜维持"点一下直接加"的老行为（selectedOptionIds 传空数组）；
   // 有选项的菜由调用方先弹 DishModifierSheet 收集选项，选完再调这个。
-  // 同款选项组合（顺序无关）会合并成同一条线累加数量，不同组合各开一条线。
-  function addToCart(dishId: string, selectedOptionIds: string[] = []) {
-    setCart((prev) => {
-      const existing = prev.find((l) => l.dishId === dishId && sameSelection(l.selectedOptionIds, selectedOptionIds));
+  // 同款选项组合（按标签文字比较，见 hook 顶部注释）合并成同一条未提交项累加数量，
+  // 不同组合各开一条。
+  async function addToCart(dishId: string, selectedOptionIds: string[] = []) {
+    if (!orderId) return;
+    setBusy(true);
+    try {
+      const targetLabels = resolveSelectedLabels(dishId, selectedOptionIds);
+      const existing = cartItems.find(
+        (i) => i.dishId === dishId && sameLabels(optionLabelsOf(i), targetLabels),
+      );
       if (existing) {
-        return prev.map((l) => (l.lineId === existing.lineId ? { ...l, quantity: l.quantity + 1 } : l));
+        await api.patch(`/orders/${orderId}/items/${existing.id}`, { quantity: existing.quantity + 1 }, tokenKind);
+      } else {
+        await api.post(`/orders/${orderId}/items`, { items: [{ dishId, quantity: 1, selectedOptionIds }] }, tokenKind);
       }
-      return [...prev, { lineId: generateLineId(), dishId, quantity: 1, selectedOptionIds }];
-    });
+      await refreshOrder();
+    } catch {
+      setError('加菜失败，请重试');
+    } finally {
+      setBusy(false);
+    }
   }
 
-  // 没有选项的菜，卡片上"-"按钮用这个：找这道菜"零选项"那条线减一份，减到 0 就整条移除
-  function decrementSimpleLine(dishId: string) {
-    setCart((prev) => {
-      const line = prev.find((l) => l.dishId === dishId && l.selectedOptionIds.length === 0);
-      if (!line) return prev;
-      if (line.quantity <= 1) return prev.filter((l) => l.lineId !== line.lineId);
-      return prev.map((l) => (l.lineId === line.lineId ? { ...l, quantity: l.quantity - 1 } : l));
-    });
+  // 没有选项的菜，卡片上"-"按钮用这个：找这道菜"零选项"那条未提交项减一份，减到 0 就整条删除
+  async function decrementSimpleLine(dishId: string) {
+    if (!orderId) return;
+    const line = cartItems.find((i) => i.dishId === dishId && optionLabelsOf(i).length === 0);
+    if (!line) return;
+    setBusy(true);
+    try {
+      if (line.quantity <= 1) {
+        await api.delete(`/orders/${orderId}/items/${line.id}`, tokenKind);
+      } else {
+        await api.patch(`/orders/${orderId}/items/${line.id}`, { quantity: line.quantity - 1 }, tokenKind);
+      }
+      await refreshOrder();
+    } catch {
+      setError('操作失败，请重试');
+    } finally {
+      setBusy(false);
+    }
   }
 
-  // 购物车抽屉里单条线自己的 +/-，改到 0 直接整条移除
-  function updateLineQuantity(lineId: string, delta: number) {
-    setCart((prev) => {
-      const next = prev
-        .map((l) => (l.lineId === lineId ? { ...l, quantity: l.quantity + delta } : l))
-        .filter((l) => l.quantity > 0);
-      return next;
-    });
+  // 购物车列表里单条项自己的 +/-，改到 0 直接整条删除
+  async function updateLineQuantity(itemId: string, delta: number) {
+    if (!orderId) return;
+    const line = cartItems.find((i) => i.id === itemId);
+    if (!line) return;
+    const nextQuantity = line.quantity + delta;
+    setBusy(true);
+    try {
+      if (nextQuantity <= 0) {
+        await api.delete(`/orders/${orderId}/items/${itemId}`, tokenKind);
+      } else {
+        await api.patch(`/orders/${orderId}/items/${itemId}`, { quantity: nextQuantity }, tokenKind);
+      }
+      await refreshOrder();
+    } catch {
+      setError('操作失败，请重试');
+    } finally {
+      setBusy(false);
+    }
   }
 
-  function removeLine(lineId: string) {
-    setCart((prev) => prev.filter((l) => l.lineId !== lineId));
+  async function removeLine(itemId: string) {
+    if (!orderId) return;
+    setBusy(true);
+    try {
+      await api.delete(`/orders/${orderId}/items/${itemId}`, tokenKind);
+      await refreshOrder();
+    } catch {
+      setError('操作失败，请重试');
+    } finally {
+      setBusy(false);
+    }
   }
 
   async function submitCart() {
-    if (!orderId || cart.length === 0) return;
+    if (!orderId || cartItems.length === 0) return;
     setBusy(true);
     try {
-      const items = cart.map((l) => ({
-        dishId: l.dishId,
-        quantity: l.quantity,
-        selectedOptionIds: l.selectedOptionIds,
-      }));
-      await api.post(`/orders/${orderId}/items`, { items }, tokenKind);
       await api.post(`/orders/${orderId}/submit`, {}, tokenKind);
-      setCart([]);
       await refreshOrder();
     } catch {
       setError('提交失败，请重试');
@@ -128,20 +188,10 @@ export function useTableOrder({ orderId, tokenKind }: { orderId: string | null; 
     }
   }
 
-  function lineUnitPrice(line: CartLine): number {
-    const dish = menu.flatMap((c) => c.dishes).find((d) => d.id === line.dishId);
-    if (!dish) return 0;
-    const optionsTotal = dish.modifierGroups
-      .flatMap((g) => g.options)
-      .filter((o) => line.selectedOptionIds.includes(o.id))
-      .reduce((sum, o) => sum + Number(o.priceDelta), 0);
-    return Number(dish.price) + optionsTotal;
-  }
-
-  const cartTotal = cart.reduce((sum, line) => sum + lineUnitPrice(line) * line.quantity, 0);
+  const cartTotal = cartItems.reduce((sum, item) => sum + Number(item.unitPriceSnapshot) * item.quantity, 0);
 
   function cartQuantityForDish(dishId: string) {
-    return cart.filter((l) => l.dishId === dishId).reduce((sum, l) => sum + l.quantity, 0);
+    return cartItems.filter((i) => i.dishId === dishId).reduce((sum, i) => sum + i.quantity, 0);
   }
 
   const activeCategory = menu.find((c) => c.id === activeCategoryId) ?? menu[0];
@@ -152,16 +202,17 @@ export function useTableOrder({ orderId, tokenKind }: { orderId: string | null; 
     activeCategoryId,
     setActiveCategoryId,
     order,
-    cart,
+    cartItems,
+    orderedItems,
     addToCart,
     decrementSimpleLine,
     updateLineQuantity,
     removeLine,
     cartQuantityForDish,
-    lineUnitPrice,
     submitCart,
     requestCheckout,
     cartTotal,
+    flashItemIds,
     error,
     setError,
     busy,

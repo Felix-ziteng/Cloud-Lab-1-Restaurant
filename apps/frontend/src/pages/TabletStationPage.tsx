@@ -131,7 +131,13 @@ export default function TabletStationPage() {
       {/* 店员在前台点"清台完成"，这一桌的会话房间会收到这一声——平板自动复位回密码页，
           不需要客人或店员在平板上做任何操作 */}
       <RealtimeListener event="table_session_ended" onEvent={resetToPasscode} />
-      <OrderingView orderId={session.orderId} tokenKind={tokenKind} tableNumber={session.tableNumber} config={config} />
+      <OrderingView
+        orderId={session.orderId}
+        tokenKind={tokenKind}
+        tableId={session.tableId}
+        tableNumber={session.tableNumber}
+        config={config}
+      />
     </RealtimeProvider>
   );
 }

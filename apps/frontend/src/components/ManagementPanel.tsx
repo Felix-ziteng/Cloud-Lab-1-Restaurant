@@ -9,7 +9,7 @@ import {
   type StaffAccount,
   type StoreConfig,
 } from '@restaurant/shared-types';
-import { api } from '../api/client';
+import { api, assetUrl, getToken } from '../api/client';
 import { applyTheme } from '../theme/applyTheme';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -208,7 +208,9 @@ function MenuManagement({ config }: { config: StoreConfig }) {
     spicyLevel: string;
     allergens: string[];
     modifierGroupIds: string[];
+    imageUrl: string | null;
   } | null>(null);
+  const [uploadingImage, setUploadingImage] = useState(false);
 
   const load = () => api.get<MenuCategory[]>('/menu?includeUnavailable=true').then(setCategories).catch(() => {});
   const loadModifierGroups = () =>
@@ -300,7 +302,32 @@ function MenuManagement({ config }: { config: StoreConfig }) {
       spicyLevel: dish.spicyLevel === null ? '' : String(dish.spicyLevel),
       allergens: dish.allergens,
       modifierGroupIds: dish.modifierGroups.map((g) => g.id),
+      imageUrl: dish.imageUrl,
     });
+  }
+
+  // 图片是独立即时生效的，不是表单草稿的一部分——选完文件立刻上传，传完马上能在预览里
+  // 看到效果，不用等点"保存"那一下才生效
+  async function uploadDishImage(dishId: string, file: File) {
+    setError(null);
+    setUploadingImage(true);
+    try {
+      const form = new FormData();
+      form.append('file', file);
+      const res = await fetch(assetUrl(`/dishes/${dishId}/image`), {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${getToken('staffToken')}` },
+        body: form,
+      });
+      if (!res.ok) throw new Error((await res.json().catch(() => null))?.message ?? '图片上传失败');
+      const updated = (await res.json()) as Dish;
+      setEditingDish((prev) => (prev && prev.id === dishId ? { ...prev, imageUrl: updated.imageUrl } : prev));
+      load();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : '图片上传失败');
+    } finally {
+      setUploadingImage(false);
+    }
   }
 
   async function saveDish(dish: Dish, e: FormEvent) {
@@ -392,6 +419,26 @@ function MenuManagement({ config }: { config: StoreConfig }) {
                       <TableRow key={dish.id}>
                         <TableCell colSpan={3}>
                           <form onSubmit={(e) => saveDish(dish, e)} className="flex flex-wrap items-center gap-2">
+                            <div className="flex items-center gap-2">
+                              {editingDish.imageUrl && (
+                                <img
+                                  src={assetUrl(editingDish.imageUrl)}
+                                  alt=""
+                                  className="size-12 rounded-lg object-cover"
+                                />
+                              )}
+                              <input
+                                type="file"
+                                accept="image/jpeg,image/png,image/webp"
+                                disabled={uploadingImage}
+                                onChange={(e) => {
+                                  const file = e.target.files?.[0];
+                                  if (file) uploadDishImage(dish.id, file);
+                                  e.target.value = '';
+                                }}
+                                className="max-w-40 text-xs"
+                              />
+                            </div>
                             <Input
                               className="max-w-32"
                               value={editingDish.name}
@@ -440,7 +487,14 @@ function MenuManagement({ config }: { config: StoreConfig }) {
                     ) : (
                       <TableRow key={dish.id}>
                         <TableCell>
-                          {dish.name} · ¥{Number(dish.price).toFixed(2)}
+                          <div className="flex items-center gap-2">
+                            {dish.imageUrl && (
+                              <img src={assetUrl(dish.imageUrl)} alt="" className="size-10 rounded object-cover" />
+                            )}
+                            <span>
+                              {dish.name} · ¥{Number(dish.price).toFixed(2)}
+                            </span>
+                          </div>
                         </TableCell>
                         <TableCell>
                           <div className="flex flex-wrap items-center gap-1.5">

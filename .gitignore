@@ -9,6 +9,9 @@ build/
 # Prisma
 apps/backend/generated/
 
+# 用户上传的菜品图片，跟 .env 一样不进版本库
+apps/backend/uploads/
+
 # Vite
 apps/frontend/dist/
 

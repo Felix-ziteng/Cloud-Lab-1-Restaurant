@@ -1,9 +1,11 @@
 import { useEffect, useRef, useState } from 'react';
 import type { Dish, StoreConfig } from '@restaurant/shared-types';
+import { assetUrl } from '../api/client';
 import { useTableOrder } from '../hooks/useTableOrder';
 import { RealtimeListener } from '../realtime/RealtimeContext';
 import DishTasteTags from './DishTasteTags';
 import DishModifierSheet from './DishModifierSheet';
+import TableQrModal from './TableQrModal';
 
 const KITCHEN_STATUS_LABEL: Record<string, string> = {
   pending: '待处理',
@@ -27,16 +29,29 @@ function ImagePlaceholderIcon() {
   );
 }
 
+function QrIcon() {
+  return (
+    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+      <rect x="3" y="3" width="7" height="7" rx="1" />
+      <rect x="14" y="3" width="7" height="7" rx="1" />
+      <rect x="3" y="14" width="7" height="7" rx="1" />
+      <path d="M14 14h3v3h-3zM19 14h2v2h-2zM14 19h2v2h-2zM19 19h2v2h-2z" />
+    </svg>
+  );
+}
+
 // 桌台平板"紧凑模式"点餐视图：菜单少的店适合——分类 Tab + 菜品网格 + 右侧常驻购物车栏。
 // 逻辑全部来自 useTableOrder（跟 GuestOrderPage 共用），这里只管横屏布局。
 export default function TabletOrderingCompact({
   orderId,
   tokenKind,
+  tableId,
   tableNumber,
   config,
 }: {
   orderId: string;
   tokenKind: string;
+  tableId: string;
   tableNumber: string;
   config?: StoreConfig | null;
 }) {
@@ -45,20 +60,22 @@ export default function TabletOrderingCompact({
     activeCategory,
     setActiveCategoryId,
     order,
-    cart,
+    cartItems,
+    orderedItems,
     addToCart,
     decrementSimpleLine,
     updateLineQuantity,
     cartQuantityForDish,
-    lineUnitPrice,
     submitCart,
     requestCheckout,
     cartTotal,
+    flashItemIds,
     error,
     busy,
     refreshOrder,
   } = useTableOrder({ orderId, tokenKind });
   const [selectingDish, setSelectingDish] = useState<Dish | null>(null);
+  const [qrOpen, setQrOpen] = useState(false);
 
   // 购物车（还没提交）和本桌已点（已提交给厨房）分 Tab 展示，不再堆在同一个列表里。
   // 默认选中哪个 Tab：购物车里有东西就优先看购物车；购物车是空的但已经点过菜，
@@ -69,7 +86,7 @@ export default function TabletOrderingCompact({
   useEffect(() => {
     if (initialTabSet.current || !order) return;
     initialTabSet.current = true;
-    if (cart.length === 0 && order.items.length > 0) setActiveTab('ordered');
+    if (cartItems.length === 0 && orderedItems.length > 0) setActiveTab('ordered');
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [order]);
 
@@ -84,7 +101,15 @@ export default function TabletOrderingCompact({
       <div className="flex h-screen w-screen flex-col overflow-hidden bg-[oklch(98%_0.006_40)] font-['Nunito_Sans',system-ui,sans-serif] text-[oklch(22%_0.01_30)]">
         <div className="flex items-baseline gap-3 bg-[oklch(60%_0.21_35)] px-8 py-3.5">
           <h1 className="font-['Baloo_2',system-ui,sans-serif] text-xl font-bold text-white">桌台 {tableNumber}</h1>
-          <p className="text-[13px] text-white/85">欢迎光临，点好菜提交给厨房就好啦</p>
+          <p className="flex-1 text-[13px] text-white/85">欢迎光临，点好菜提交给厨房就好啦</p>
+          <button
+            type="button"
+            onClick={() => setQrOpen(true)}
+            className="flex size-9 shrink-0 items-center justify-center rounded-full bg-white/15"
+            title="扫码点餐"
+          >
+            <QrIcon />
+          </button>
         </div>
 
         {!order ? (
@@ -127,8 +152,12 @@ export default function TabletOrderingCompact({
                   const qty = cartQuantityForDish(dish.id);
                   return (
                     <div key={dish.id} className="flex flex-col gap-3 rounded-[20px] bg-white p-4.5 shadow-[0_2px_4px_oklch(20%_0.02_30_/_0.06),0_8px_20px_oklch(20%_0.02_30_/_0.08)]">
-                      <div className="flex aspect-[16/10] items-center justify-center rounded-[14px] bg-[oklch(93%_0.04_45)]">
-                        <ImagePlaceholderIcon />
+                      <div className="flex aspect-[16/10] items-center justify-center overflow-hidden rounded-[14px] bg-[oklch(93%_0.04_45)]">
+                        {dish.imageUrl ? (
+                          <img src={assetUrl(dish.imageUrl)} alt="" className="size-full object-cover" />
+                        ) : (
+                          <ImagePlaceholderIcon />
+                        )}
                       </div>
                       <div>
                         <p className="mb-1.5 text-[15px] font-bold">{dish.name}</p>
@@ -183,7 +212,7 @@ export default function TabletOrderingCompact({
                       : "rounded-full bg-[oklch(94%_0.01_40)] px-4 py-2 font-['Baloo_2',system-ui,sans-serif] text-[15px] font-bold text-[oklch(45%_0.02_30)]"
                   }
                 >
-                  购物车 ({cart.reduce((s, l) => s + l.quantity, 0)})
+                  购物车 ({cartItems.reduce((s, i) => s + i.quantity, 0)})
                 </button>
                 <button
                   type="button"
@@ -194,54 +223,53 @@ export default function TabletOrderingCompact({
                       : "rounded-full bg-[oklch(94%_0.01_40)] px-4 py-2 font-['Baloo_2',system-ui,sans-serif] text-[15px] font-bold text-[oklch(45%_0.02_30)]"
                   }
                 >
-                  本桌已点 ({order.items.length})
+                  本桌已点 ({orderedItems.length})
                 </button>
               </div>
 
               {activeTab === 'cart' ? (
                 <>
                   <div className="flex flex-col gap-3.5">
-                    {cart.length === 0 ? (
+                    {cartItems.length === 0 ? (
                       <p className="text-sm text-[oklch(55%_0.02_30)]">还没有点菜</p>
                     ) : (
-                      cart.map((line) => {
-                        const dish = menu.flatMap((c) => c.dishes).find((d) => d.id === line.dishId);
-                        if (!dish) return null;
-                        const optionLabels = dish.modifierGroups
-                          .flatMap((g) => g.options)
-                          .filter((o) => line.selectedOptionIds.includes(o.id))
-                          .map((o) => o.label);
-                        return (
-                          <div key={line.lineId} className="flex items-center justify-between gap-2 text-sm">
-                            <div>
-                              <p className="font-bold">{dish.name}</p>
-                              {optionLabels.length > 0 && (
-                                <p className="text-xs text-[oklch(55%_0.02_30)]">{optionLabels.join(' · ')}</p>
-                              )}
-                              <div className="flex items-center gap-2 pt-0.5">
-                                <button
-                                  type="button"
-                                  onClick={() => updateLineQuantity(line.lineId, -1)}
-                                  className="flex size-6 items-center justify-center rounded-full bg-[oklch(94%_0.01_40)] text-sm font-bold text-[oklch(45%_0.02_30)]"
-                                >
-                                  −
-                                </button>
-                                <span className="min-w-3 text-center text-[oklch(50%_0.02_40)]">× {line.quantity}</span>
-                                <button
-                                  type="button"
-                                  onClick={() => updateLineQuantity(line.lineId, 1)}
-                                  className="flex size-6 items-center justify-center rounded-full bg-[oklch(60%_0.21_35)] text-sm font-bold text-white"
-                                >
-                                  +
-                                </button>
-                              </div>
+                      cartItems.map((item) => (
+                        <div
+                          key={item.id}
+                          className={`flex items-center justify-between gap-2 rounded-xl px-2 py-1.5 text-sm transition-colors duration-700 ${
+                            flashItemIds.has(item.id) ? 'bg-[oklch(88%_0.1_150)]' : 'bg-transparent'
+                          }`}
+                        >
+                          <div>
+                            <p className="font-bold">{item.dishNameSnapshot}</p>
+                            {item.selectedModifiers && item.selectedModifiers.length > 0 && (
+                              <p className="text-xs text-[oklch(55%_0.02_30)]">
+                                {item.selectedModifiers.map((m) => m.optionLabel).join(' · ')}
+                              </p>
+                            )}
+                            <div className="flex items-center gap-2 pt-0.5">
+                              <button
+                                type="button"
+                                onClick={() => updateLineQuantity(item.id, -1)}
+                                className="flex size-6 items-center justify-center rounded-full bg-[oklch(94%_0.01_40)] text-sm font-bold text-[oklch(45%_0.02_30)]"
+                              >
+                                −
+                              </button>
+                              <span className="min-w-3 text-center text-[oklch(50%_0.02_40)]">× {item.quantity}</span>
+                              <button
+                                type="button"
+                                onClick={() => updateLineQuantity(item.id, 1)}
+                                className="flex size-6 items-center justify-center rounded-full bg-[oklch(60%_0.21_35)] text-sm font-bold text-white"
+                              >
+                                +
+                              </button>
                             </div>
-                            <span className="font-bold text-[oklch(58%_0.2_35)]">
-                              ¥{(lineUnitPrice(line) * line.quantity).toFixed(2)}
-                            </span>
                           </div>
-                        );
-                      })
+                          <span className="font-bold text-[oklch(58%_0.2_35)]">
+                            ¥{(Number(item.unitPriceSnapshot) * item.quantity).toFixed(2)}
+                          </span>
+                        </div>
+                      ))
                     )}
                   </div>
 
@@ -255,7 +283,7 @@ export default function TabletOrderingCompact({
                   <button
                     type="button"
                     onClick={submitCart}
-                    disabled={busy || cart.length === 0}
+                    disabled={busy || cartItems.length === 0}
                     className="rounded-full bg-[oklch(18%_0.01_30)] p-4.5 text-center text-[17px] font-bold text-white disabled:opacity-50"
                   >
                     提交给厨房
@@ -264,10 +292,10 @@ export default function TabletOrderingCompact({
               ) : (
                 <>
                   <div className="flex flex-col gap-2">
-                    {order.items.length === 0 ? (
+                    {orderedItems.length === 0 ? (
                       <p className="text-sm text-[oklch(55%_0.02_30)]">这桌还没有已提交的菜</p>
                     ) : (
-                      order.items.map((item) => (
+                      orderedItems.map((item) => (
                         <div key={item.id} className="flex items-center justify-between gap-2 text-sm">
                           <div>
                             <span>{item.dishNameSnapshot} × {item.quantity}</span>
@@ -277,13 +305,9 @@ export default function TabletOrderingCompact({
                               </p>
                             )}
                           </div>
-                          {item.roundNumber > 0 ? (
-                            <span className={`rounded-full px-2.5 py-0.5 text-xs font-bold ${KITCHEN_STATUS_CLASS[item.kitchenStatus]}`}>
-                              {KITCHEN_STATUS_LABEL[item.kitchenStatus]}
-                            </span>
-                          ) : (
-                            <span className="rounded-full bg-[oklch(94%_0.01_40)] px-2.5 py-0.5 text-xs font-bold text-[oklch(45%_0.02_30)]">未提交</span>
-                          )}
+                          <span className={`rounded-full px-2.5 py-0.5 text-xs font-bold ${KITCHEN_STATUS_CLASS[item.kitchenStatus]}`}>
+                            {KITCHEN_STATUS_LABEL[item.kitchenStatus]}
+                          </span>
                         </div>
                       ))
                     )}
@@ -296,7 +320,7 @@ export default function TabletOrderingCompact({
                     <span className="font-['Baloo_2',system-ui,sans-serif] text-2xl font-bold">¥{Number(order.total).toFixed(2)}</span>
                   </div>
 
-                  {order.status === 'open' && order.items.some((i) => i.roundNumber > 0) && (
+                  {order.status === 'open' && orderedItems.length > 0 && (
                     <button
                       type="button"
                       onClick={requestCheckout}
@@ -323,6 +347,8 @@ export default function TabletOrderingCompact({
           }}
         />
       )}
+
+      {qrOpen && <TableQrModal tableId={tableId} tableNumber={tableNumber} onClose={() => setQrOpen(false)} />}
     </>
   );
 }

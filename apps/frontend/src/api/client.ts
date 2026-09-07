@@ -10,6 +10,12 @@ const BASE_URL = import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:3000/api
 // 让它按"当前页面同源"连接，而不是指望空字符串被正确解析成 URL
 export const SOCKET_URL = BASE_URL.replace(/\/api\/?$/, '') || undefined;
 
+// 菜品图片这类静态资源走普通 REST 路由（见 menu.controller.ts 的 GET uploads/dishes/:filename），
+// 天然带 /api 前缀，直接拼 BASE_URL 就行，不用像 SOCKET_URL 那样去掉后缀
+export function assetUrl(path: string): string {
+  return `${BASE_URL}${path}`;
+}
+
 // 'guest:{tableId}' 这种带参数的 key 也合法：桌台会话令牌必须按桌台区分存储，
 // 不能用一个全局的 'guestToken'，否则扫了 A 桌又扫 B 桌会复用 A 桌的令牌（token 里的 orderId 对不上）
 export type TokenKind = 'staffToken' | (string & {});

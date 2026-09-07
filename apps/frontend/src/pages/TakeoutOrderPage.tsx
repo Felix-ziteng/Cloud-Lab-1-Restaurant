@@ -1,7 +1,7 @@
 import { useEffect, useState, type FormEvent } from 'react';
 import { useNavigate } from 'react-router-dom';
 import type { GuestOrderCreated, MenuCategory, StoreConfig } from '@restaurant/shared-types';
-import { api, setToken } from '../api/client';
+import { api, assetUrl, setToken } from '../api/client';
 import DishTasteTags from '../components/DishTasteTags';
 
 // 图片占位图标：菜品还没有真实图片素材时的通用占位，不用 emoji（跟 GuestOrderPage 共用同一个画法，
@@ -179,8 +179,12 @@ export default function TakeoutOrderPage() {
                     key={dish.id}
                     className="flex items-center gap-3.5 rounded-[20px] bg-white p-3.5 shadow-[0_2px_4px_oklch(20%_0.02_30_/_0.06),0_8px_20px_oklch(20%_0.02_30_/_0.08)]"
                   >
-                    <div className="flex size-16 shrink-0 items-center justify-center rounded-2xl bg-[oklch(93%_0.04_45)]">
-                      <ImagePlaceholderIcon />
+                    <div className="flex size-16 shrink-0 items-center justify-center overflow-hidden rounded-2xl bg-[oklch(93%_0.04_45)]">
+                      {dish.imageUrl ? (
+                        <img src={assetUrl(dish.imageUrl)} alt="" className="size-full object-cover" />
+                      ) : (
+                        <ImagePlaceholderIcon />
+                      )}
                     </div>
                     <div className="min-w-0 flex-1">
                       <p className="mb-1 text-sm font-bold">{dish.name}</p>

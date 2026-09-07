@@ -80,6 +80,12 @@ export class MenuService {
     return dish;
   }
 
+  // 上传接口存完文件之后调这个，只更新 imageUrl 这一个字段——不走 updateDish/UpsertDishDto
+  // 那一整套（不想让"传一张图"意外触发辣度/过敏原必填校验或选项组同步）
+  updateDishImage(id: string, imageUrl: string) {
+    return this.prisma.dish.update({ where: { id }, data: { imageUrl } });
+  }
+
   async deleteDish(id: string) {
     const dish = await this.prisma.dish.findUnique({ where: { id } });
     if (!dish) throw new NotFoundException('菜品不存在');

@@ -25,6 +25,11 @@ model StoreConfig {
   // 这两个开关默认关闭：不强迫所有店铺维护辣度/过敏原字段，开启后新增/编辑菜品才必须标注（见 menu.service.ts）
   showSpicyLevel         Boolean  @default(false)
   showAllergens          Boolean  @default(false)
+  // 前台"临时切换菜单版本"用：非空就优先于自动规则判断，但只在当天有效——
+  // activeMenuProfileOverrideDate 跟当前本地日期不一致就当作已过期、忽略，
+  // 不需要额外的定时任务去清空它（见 menu-profiles.service.ts 的 resolveActive）
+  activeMenuProfileOverrideId   String?
+  activeMenuProfileOverrideDate String?
   updatedAt              DateTime @updatedAt
 
   @@map("store_config")
@@ -243,10 +248,27 @@ model Category {
   id        String @id @default(uuid())
   name      String
   sortOrder Int    @default(0)
+  // 这个分类属于哪些菜单版本；空数组 = 所有版本都显示（opt-out，不强迫商家逐个打标签，
+  // 见 menu-profiles 模块）
+  menuProfileIds String[] @default([])
 
   dishes Dish[]
 
   @@map("categories")
+}
+
+model MenuProfile {
+  id        String  @id @default(uuid())
+  name      String
+  isDefault Boolean @default(false)
+  sortOrder Int     @default(0)
+  // [{ daysOfWeek: number[] (0=周日...6=周六), startTime: "11:00", endTime: "14:00" }]
+  // 一个版本可以挂好几条规则（比如"午市"版本工作日和周末营业时间不同但菜单一样，
+  // 就挂两条规则）；规则跟版本本身是一体的，不会被单独查询，用 JSON 存数组，
+  // 不用为此单开一张关联表
+  rules Json @default("[]")
+
+  @@map("menu_profiles")
 }
 
 model Dish {
