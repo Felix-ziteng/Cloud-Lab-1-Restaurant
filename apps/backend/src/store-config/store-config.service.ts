@@ -24,6 +24,11 @@ export class StoreConfigService {
       tabletMenuLayout?: TabletMenuLayout;
       showSpicyLevel?: boolean;
       showAllergens?: boolean;
+      // 前台"临时切换菜单版本"用，见 menu-profiles.service.ts 的 setOverride——
+      // 不经过这个 service 对外暴露的 manager-only PATCH /store-config 路由，
+      // 是 MenuProfilesService 直接调用这个方法写的
+      activeMenuProfileOverrideId?: string | null;
+      activeMenuProfileOverrideDate?: string | null;
     },
   ) {
     return this.prisma.storeConfig.upsert({

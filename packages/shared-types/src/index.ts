@@ -127,6 +127,22 @@ export interface Category {
   id: string;
   name: string;
   sortOrder: number;
+  // 这个分类属于哪些菜单版本；空数组 = 所有版本都显示，见 MenuProfile
+  menuProfileIds: string[];
+}
+
+export interface MenuProfileRule {
+  daysOfWeek: number[]; // 0=周日...6=周六
+  startTime: string; // "HH:mm"
+  endTime: string; // "HH:mm"
+}
+
+export interface MenuProfile {
+  id: string;
+  name: string;
+  isDefault: boolean;
+  sortOrder: number;
+  rules: MenuProfileRule[];
 }
 
 // GET /api/menu

@@ -1,11 +1,12 @@
 import { useEffect, useState, type FormEvent } from 'react';
 import { NavLink, Outlet } from 'react-router-dom';
-import type { StoreConfig } from '@restaurant/shared-types';
+import type { MenuProfile, StoreConfig } from '@restaurant/shared-types';
 import { api, setToken, getToken, clearToken, onAuthInvalidated } from '../api/client';
 import { RealtimeProvider } from '../realtime/RealtimeContext';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 
 // 子路由用 useOutletContext<FrontDeskContext>() 取这几样，不用另起一个 Context Provider——
 // react-router 的 Outlet context 就是给这种"壳持有状态、子页面读"的场景准备的
@@ -166,10 +167,67 @@ export default function FrontDeskLayout() {
 
         <main className="flex-1 p-6">
           <div className="mx-auto flex max-w-5xl flex-col gap-6">
+            <MenuProfileIndicator />
             <Outlet context={context} />
           </div>
         </main>
       </div>
     </RealtimeProvider>
+  );
+}
+
+const AUTO_OPTION = '__auto__';
+
+// 当前生效菜单版本指示器 + 临时切换：只有商家建过至少一个菜单版本才显示这一条，
+// 一个版本都没建（最常见的"只有一份菜单"场景）就什么都不显示，不给用户添麻烦。
+// 权限上任意登录店员都能切（POST /menu-profiles/override 不要求 manager），
+// 建/改/删版本本身才需要 manager，在"管理"面板的"菜单版本"里做
+function MenuProfileIndicator() {
+  const [profiles, setProfiles] = useState<MenuProfile[]>([]);
+  const [activeId, setActiveId] = useState<string | null>(null);
+  const [loaded, setLoaded] = useState(false);
+
+  function refresh() {
+    Promise.all([
+      api.get<MenuProfile[]>('/menu-profiles', 'staffToken'),
+      api.get<MenuProfile | null>('/menu-profiles/active'),
+    ])
+      .then(([list, active]) => {
+        setProfiles(list);
+        setActiveId(active?.id ?? null);
+        setLoaded(true);
+      })
+      .catch(() => setLoaded(true));
+  }
+
+  useEffect(refresh, []);
+
+  async function handleChange(value: string) {
+    await api.post('/menu-profiles/override', { profileId: value === AUTO_OPTION ? null : value }, 'staffToken');
+    refresh();
+  }
+
+  if (!loaded || profiles.length === 0) return null;
+
+  const activeProfile = profiles.find((p) => p.id === activeId);
+
+  return (
+    <div className="flex items-center gap-2.5 rounded-md border border-border bg-secondary/50 px-3 py-2 text-sm">
+      <span className="text-muted-foreground">当前菜单：</span>
+      <span className="font-medium text-foreground">{activeProfile?.name ?? '不限制'}</span>
+      <Select value={activeId ?? AUTO_OPTION} onValueChange={handleChange}>
+        <SelectTrigger size="sm" className="ml-auto w-40">
+          <SelectValue placeholder="切换菜单版本" />
+        </SelectTrigger>
+        <SelectContent>
+          <SelectItem value={AUTO_OPTION}>自动（按规则判断）</SelectItem>
+          {profiles.map((profile) => (
+            <SelectItem key={profile.id} value={profile.id}>
+              {profile.name}
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
+    </div>
   );
 }

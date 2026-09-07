@@ -4,6 +4,8 @@ import {
   SPICY_LEVEL_LABELS,
   type Dish,
   type MenuCategory,
+  type MenuProfile,
+  type MenuProfileRule,
   type ModifierGroup,
   type TableWithSession,
   type StaffAccount,
@@ -194,12 +196,16 @@ const emptyDishDraft = {
 function MenuManagement({ config }: { config: StoreConfig }) {
   const [categories, setCategories] = useState<MenuCategory[]>([]);
   const [modifierGroups, setModifierGroups] = useState<ModifierGroup[]>([]);
+  const [menuProfiles, setMenuProfiles] = useState<MenuProfile[]>([]);
   const [newCategoryName, setNewCategoryName] = useState('');
   const [newDish, setNewDish] = useState<Record<string, typeof emptyDishDraft>>({});
   const [error, setError] = useState<string | null>(null);
-  const [editingCategory, setEditingCategory] = useState<{ id: string; name: string; sortOrder: string } | null>(
-    null,
-  );
+  const [editingCategory, setEditingCategory] = useState<{
+    id: string;
+    name: string;
+    sortOrder: string;
+    menuProfileIds: string[];
+  } | null>(null);
   const [editingDish, setEditingDish] = useState<{
     id: string;
     name: string;
@@ -215,9 +221,12 @@ function MenuManagement({ config }: { config: StoreConfig }) {
   const load = () => api.get<MenuCategory[]>('/menu?includeUnavailable=true').then(setCategories).catch(() => {});
   const loadModifierGroups = () =>
     api.get<ModifierGroup[]>('/modifier-groups', 'staffToken').then(setModifierGroups).catch(() => {});
+  const loadMenuProfiles = () =>
+    api.get<MenuProfile[]>('/menu-profiles', 'staffToken').then(setMenuProfiles).catch(() => {});
   useEffect(() => {
     load();
     loadModifierGroups();
+    loadMenuProfiles();
   }, []);
 
   async function run(action: () => Promise<void>) {
@@ -244,7 +253,12 @@ function MenuManagement({ config }: { config: StoreConfig }) {
   }
 
   function startEditCategory(category: MenuCategory) {
-    setEditingCategory({ id: category.id, name: category.name, sortOrder: String(category.sortOrder) });
+    setEditingCategory({
+      id: category.id,
+      name: category.name,
+      sortOrder: String(category.sortOrder),
+      menuProfileIds: category.menuProfileIds,
+    });
   }
 
   async function saveCategory(e: FormEvent) {
@@ -253,7 +267,11 @@ function MenuManagement({ config }: { config: StoreConfig }) {
     await run(async () => {
       await api.put(
         `/categories/${editingCategory.id}`,
-        { name: editingCategory.name, sortOrder: Number(editingCategory.sortOrder) || 0 },
+        {
+          name: editingCategory.name,
+          sortOrder: Number(editingCategory.sortOrder) || 0,
+          menuProfileIds: editingCategory.menuProfileIds,
+        },
         'staffToken',
       );
       setEditingCategory(null);
@@ -391,6 +409,13 @@ function MenuManagement({ config }: { config: StoreConfig }) {
                     value={editingCategory.sortOrder}
                     onChange={(e) => setEditingCategory({ ...editingCategory, sortOrder: e.target.value })}
                   />
+                  {menuProfiles.length > 0 && (
+                    <MenuProfileCheckboxes
+                      profiles={menuProfiles}
+                      value={editingCategory.menuProfileIds}
+                      onChange={(v) => setEditingCategory({ ...editingCategory, menuProfileIds: v })}
+                    />
+                  )}
                   <Button type="submit" size="sm">
                     保存
                   </Button>
@@ -604,6 +629,7 @@ function MenuManagement({ config }: { config: StoreConfig }) {
       </CardContent>
     </Card>
     <ModifierGroupManagement groups={modifierGroups} onChanged={loadModifierGroups} />
+    <MenuProfileManagement profiles={menuProfiles} onChanged={loadMenuProfiles} />
     </div>
   );
 }
@@ -665,6 +691,34 @@ function ModifierGroupCheckboxes({
             }
           />
           {group.name}
+        </label>
+      ))}
+    </div>
+  );
+}
+
+function MenuProfileCheckboxes({
+  profiles,
+  value,
+  onChange,
+}: {
+  profiles: MenuProfile[];
+  value: string[];
+  onChange: (value: string[]) => void;
+}) {
+  return (
+    <div className="flex flex-wrap items-center gap-2.5">
+      <span className="text-xs text-muted-foreground">所属菜单版本（不选=所有版本都显示）：</span>
+      {profiles.map((profile) => (
+        <label key={profile.id} className="flex items-center gap-1 text-xs text-muted-foreground">
+          <input
+            type="checkbox"
+            checked={value.includes(profile.id)}
+            onChange={(e) =>
+              onChange(e.target.checked ? [...value, profile.id] : value.filter((id) => id !== profile.id))
+            }
+          />
+          {profile.name}
         </label>
       ))}
     </div>
@@ -914,6 +968,330 @@ function ModifierGroupManagement({ groups, onChanged }: { groups: ModifierGroup[
           <OptionRows draft={newGroup} setDraft={setNewGroup} />
           <Button type="submit" size="sm" className="w-fit">
             新增选项组
+          </Button>
+        </form>
+      </CardContent>
+    </Card>
+  );
+}
+
+const WEEKDAY_LABELS = ['周日', '周一', '周二', '周三', '周四', '周五', '周六'];
+
+const WEEKDAYS_ALL = [0, 1, 2, 3, 4, 5, 6];
+const WEEKDAYS_MON_FRI = [1, 2, 3, 4, 5];
+const WEEKDAYS_SAT_SUN = [0, 6];
+
+// 菜单版本名称固定从这份预设里选，不再自由输入——为后续多语言铺路（名称会展示给顾客，
+// 固定枚举才能一一映射翻译）。每项自带默认时间规则，选中后回填，商家可以在下面继续改；
+// 节假日相关的几项没有默认规则，只能靠前台手动切换打开（法定节假日日期年年不同，没法预设）。
+const MENU_PROFILE_PRESETS: { id: string; name: string; defaultRules: MenuProfileRule[] }[] = [
+  { id: 'lunch', name: '午餐', defaultRules: [{ daysOfWeek: WEEKDAYS_ALL, startTime: '11:00', endTime: '14:00' }] },
+  {
+    id: 'weekday_lunch',
+    name: '工作日午餐',
+    defaultRules: [{ daysOfWeek: WEEKDAYS_MON_FRI, startTime: '11:00', endTime: '14:00' }],
+  },
+  { id: 'dinner', name: '晚餐', defaultRules: [{ daysOfWeek: WEEKDAYS_ALL, startTime: '17:00', endTime: '21:00' }] },
+  {
+    id: 'weekday_dinner',
+    name: '工作日晚餐',
+    defaultRules: [{ daysOfWeek: WEEKDAYS_MON_FRI, startTime: '17:00', endTime: '21:00' }],
+  },
+  {
+    id: 'weekend_lunch',
+    name: '周末午餐',
+    defaultRules: [{ daysOfWeek: WEEKDAYS_SAT_SUN, startTime: '11:00', endTime: '14:00' }],
+  },
+  {
+    id: 'weekend_dinner',
+    name: '周末晚餐',
+    defaultRules: [{ daysOfWeek: WEEKDAYS_SAT_SUN, startTime: '17:00', endTime: '21:00' }],
+  },
+  { id: 'holiday', name: '节假日', defaultRules: [] },
+  { id: 'holiday_lunch', name: '节假日午餐', defaultRules: [] },
+  { id: 'holiday_dinner', name: '节假日晚餐', defaultRules: [] },
+];
+
+function findMenuProfilePresetIdByName(name: string): string {
+  return MENU_PROFILE_PRESETS.find((p) => p.name === name)?.id ?? '';
+}
+
+function ruleSummary(rules: MenuProfileRule[]): string {
+  if (rules.length === 0) return '无自动规则（仅前台手动切换，比如节假日菜单）';
+  return rules
+    .map((r) => `${r.daysOfWeek.map((d) => WEEKDAY_LABELS[d]).join('')} ${r.startTime}-${r.endTime}`)
+    .join('、');
+}
+
+// 一条规则的星期几复选框 + 时间段——定义成模块级别的独立组件，不嵌套在 MenuProfileManagement
+// 内部：嵌套定义会导致每次父组件渲染都创建一个新的函数/组件身份，React 把它当成不同的组件类型、
+// 卸载重装整棵子树，输入框每敲一个字就丢焦点（这个 bug 之前在 OptionRows 上踩过一次，见其注释）
+function MenuProfileRuleRows({
+  rules,
+  setRules,
+}: {
+  rules: MenuProfileRule[];
+  setRules: (rules: MenuProfileRule[]) => void;
+}) {
+  return (
+    <div className="flex flex-col gap-2">
+      {rules.map((rule, index) => (
+        <div key={index} className="flex flex-wrap items-center gap-2 rounded border border-border p-2">
+          <div className="flex flex-wrap gap-1.5">
+            {WEEKDAY_LABELS.map((label, day) => (
+              <label key={day} className="flex items-center gap-0.5 text-xs">
+                <input
+                  type="checkbox"
+                  checked={rule.daysOfWeek.includes(day)}
+                  onChange={(e) => {
+                    const daysOfWeek = e.target.checked
+                      ? [...rule.daysOfWeek, day]
+                      : rule.daysOfWeek.filter((d) => d !== day);
+                    setRules(rules.map((r, i) => (i === index ? { ...r, daysOfWeek } : r)));
+                  }}
+                />
+                {label}
+              </label>
+            ))}
+          </div>
+          <Input
+            type="time"
+            className="w-28"
+            value={rule.startTime}
+            onChange={(e) => setRules(rules.map((r, i) => (i === index ? { ...r, startTime: e.target.value } : r)))}
+          />
+          <span className="text-xs text-muted-foreground">至</span>
+          <Input
+            type="time"
+            className="w-28"
+            value={rule.endTime}
+            onChange={(e) => setRules(rules.map((r, i) => (i === index ? { ...r, endTime: e.target.value } : r)))}
+          />
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            onClick={() => setRules(rules.filter((_, i) => i !== index))}
+          >
+            删除规则
+          </Button>
+        </div>
+      ))}
+      <Button
+        type="button"
+        variant="outline"
+        size="sm"
+        className="w-fit"
+        onClick={() => setRules([...rules, { daysOfWeek: [], startTime: '11:00', endTime: '14:00' }])}
+      >
+        + 加一条自动生效规则
+      </Button>
+    </div>
+  );
+}
+
+type MenuProfileDraft = {
+  name: string;
+  isDefault: boolean;
+  sortOrder: string;
+  rules: MenuProfileRule[];
+};
+
+const emptyMenuProfileDraft: MenuProfileDraft = { name: '', isDefault: false, sortOrder: '0', rules: [] };
+
+// 门店级"菜单版本"管理（午市/晚市/周末/节假日这类）：不预设内容，商家自己建，建好了在上面
+// 菜单管理里给分类勾选属于哪个版本（见 MenuProfileCheckboxes）
+function MenuProfileManagement({ profiles, onChanged }: { profiles: MenuProfile[]; onChanged: () => void }) {
+  const [error, setError] = useState<string | null>(null);
+  const [newProfile, setNewProfile] = useState<MenuProfileDraft>(emptyMenuProfileDraft);
+  const [editingProfile, setEditingProfile] = useState<(MenuProfileDraft & { id: string }) | null>(null);
+
+  async function run(action: () => Promise<void>) {
+    setError(null);
+    try {
+      await action();
+      onChanged();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : '操作失败');
+    }
+  }
+
+  function toPayload(draft: MenuProfileDraft) {
+    return {
+      name: draft.name,
+      isDefault: draft.isDefault,
+      sortOrder: Number(draft.sortOrder) || 0,
+      rules: draft.rules,
+    };
+  }
+
+  // 选中某个预设：名称直接取预设文案，规则回填预设默认值（深拷贝，避免改动共享同一份预设常量）
+  function applyPreset(id: string, apply: (name: string, rules: MenuProfileRule[]) => void) {
+    const preset = MENU_PROFILE_PRESETS.find((p) => p.id === id);
+    if (!preset) return;
+    apply(
+      preset.name,
+      preset.defaultRules.map((r) => ({ ...r, daysOfWeek: [...r.daysOfWeek] })),
+    );
+  }
+
+  async function createProfile(e: FormEvent) {
+    e.preventDefault();
+    if (!newProfile.name.trim()) {
+      setError('请选择菜单版本类型');
+      return;
+    }
+    await run(async () => {
+      await api.post('/menu-profiles', toPayload(newProfile), 'staffToken');
+      setNewProfile(emptyMenuProfileDraft);
+    });
+  }
+
+  function startEditProfile(profile: MenuProfile) {
+    setEditingProfile({
+      id: profile.id,
+      name: profile.name,
+      isDefault: profile.isDefault,
+      sortOrder: String(profile.sortOrder),
+      rules: profile.rules,
+    });
+  }
+
+  async function saveProfile(e: FormEvent) {
+    e.preventDefault();
+    if (!editingProfile) return;
+    if (!editingProfile.name.trim()) {
+      setError('请选择菜单版本类型');
+      return;
+    }
+    await run(async () => {
+      await api.put(`/menu-profiles/${editingProfile.id}`, toPayload(editingProfile), 'staffToken');
+      setEditingProfile(null);
+    });
+  }
+
+  async function deleteProfile(id: string) {
+    await run(() => api.delete(`/menu-profiles/${id}`, 'staffToken'));
+  }
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle>菜单版本</CardTitle>
+      </CardHeader>
+      <CardContent className="flex flex-col gap-4">
+        <ErrorBanner error={error} />
+        <p className="text-sm text-muted-foreground">
+          不建任何版本 = 只有一份菜单，不受影响。建好版本后，去上面"菜单管理"里给分类勾选所属版本——
+          不勾选的分类在所有版本下都显示。没配自动规则的版本（比如节假日菜单）只能靠前台手动切换打开。
+        </p>
+
+        <div className="flex flex-col gap-3">
+          {profiles.map((profile) =>
+            editingProfile?.id === profile.id ? (
+              <form
+                key={profile.id}
+                onSubmit={saveProfile}
+                className="flex flex-col gap-2 rounded-lg border border-border p-3"
+              >
+                <div className="flex flex-wrap items-center gap-2">
+                  <Select
+                    value={findMenuProfilePresetIdByName(editingProfile.name)}
+                    onValueChange={(id) =>
+                      applyPreset(id, (name, rules) => setEditingProfile({ ...editingProfile, name, rules }))
+                    }
+                  >
+                    <SelectTrigger className="w-44">
+                      <SelectValue placeholder="选择菜单版本类型" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {MENU_PROFILE_PRESETS.map((preset) => (
+                        <SelectItem key={preset.id} value={preset.id}>
+                          {preset.name}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  <label className="flex items-center gap-1 text-xs text-muted-foreground">
+                    <input
+                      type="checkbox"
+                      checked={editingProfile.isDefault}
+                      onChange={(e) => setEditingProfile({ ...editingProfile, isDefault: e.target.checked })}
+                    />
+                    设为默认版本
+                  </label>
+                  <Input
+                    className="w-20"
+                    type="number"
+                    placeholder="排序"
+                    value={editingProfile.sortOrder}
+                    onChange={(e) => setEditingProfile({ ...editingProfile, sortOrder: e.target.value })}
+                  />
+                </div>
+                <MenuProfileRuleRows
+                  rules={editingProfile.rules}
+                  setRules={(rules) => setEditingProfile({ ...editingProfile, rules })}
+                />
+                <div className="flex gap-2">
+                  <Button type="submit" size="sm">
+                    保存
+                  </Button>
+                  <Button type="button" variant="ghost" size="sm" onClick={() => setEditingProfile(null)}>
+                    取消
+                  </Button>
+                </div>
+              </form>
+            ) : (
+              <div key={profile.id} className="flex items-center justify-between rounded-lg border border-border p-3">
+                <div className="flex flex-col gap-1">
+                  <div className="flex items-center gap-2">
+                    <span className="text-sm font-medium text-foreground">{profile.name}</span>
+                    {profile.isDefault && <Badge variant="secondary">默认</Badge>}
+                  </div>
+                  <p className="text-xs text-muted-foreground">{ruleSummary(profile.rules)}</p>
+                </div>
+                <div className="flex gap-2">
+                  <Button variant="ghost" size="sm" onClick={() => startEditProfile(profile)}>
+                    编辑
+                  </Button>
+                  <Button variant="ghost" size="sm" onClick={() => deleteProfile(profile.id)}>
+                    删除
+                  </Button>
+                </div>
+              </div>
+            ),
+          )}
+        </div>
+
+        <form onSubmit={createProfile} className="flex flex-col gap-2 rounded-lg border border-dashed border-border p-3">
+          <div className="flex flex-wrap items-center gap-2">
+            <Select
+              value={findMenuProfilePresetIdByName(newProfile.name)}
+              onValueChange={(id) => applyPreset(id, (name, rules) => setNewProfile({ ...newProfile, name, rules }))}
+            >
+              <SelectTrigger className="w-44">
+                <SelectValue placeholder="选择菜单版本类型" />
+              </SelectTrigger>
+              <SelectContent>
+                {MENU_PROFILE_PRESETS.map((preset) => (
+                  <SelectItem key={preset.id} value={preset.id}>
+                    {preset.name}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <label className="flex items-center gap-1 text-xs text-muted-foreground">
+              <input
+                type="checkbox"
+                checked={newProfile.isDefault}
+                onChange={(e) => setNewProfile({ ...newProfile, isDefault: e.target.checked })}
+              />
+              设为默认版本
+            </label>
+          </div>
+          <MenuProfileRuleRows rules={newProfile.rules} setRules={(rules) => setNewProfile({ ...newProfile, rules })} />
+          <Button type="submit" size="sm" className="w-fit">
+            新增菜单版本
           </Button>
         </form>
       </CardContent>

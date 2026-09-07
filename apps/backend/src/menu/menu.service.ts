@@ -1,6 +1,7 @@
 import { BadRequestException, ConflictException, Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { StoreConfigService } from '../store-config/store-config.service';
+import { MenuProfilesService } from '../menu-profiles/menu-profiles.service';
 import { UpsertDishDto } from './dto/upsert-dish.dto';
 import { UpsertCategoryDto } from './dto/upsert-category.dto';
 
@@ -9,10 +10,15 @@ export class MenuService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly storeConfig: StoreConfigService,
+    private readonly menuProfiles: MenuProfilesService,
   ) {}
 
-  // 顾客视角：只看可售菜品；店员/管理端传 includeUnavailable=true 看全部
+  // 顾客视角：只看可售菜品；店员/管理端传 includeUnavailable=true 看全部。
+  // 分类按当前生效的菜单版本过滤（见 MenuProfilesService.resolveActive）——没配置多菜单版本
+  // 时 activeProfile 是 null，完全不过滤，行为跟这个功能上线前一样
   async getMenu(includeUnavailable = false) {
+    const activeProfile = await this.menuProfiles.resolveActive();
+
     const categories = await this.prisma.category.findMany({
       orderBy: { sortOrder: 'asc' },
       include: {
@@ -29,9 +35,13 @@ export class MenuService {
       },
     });
 
+    const visible = activeProfile
+      ? categories.filter((c) => c.menuProfileIds.length === 0 || c.menuProfileIds.includes(activeProfile.id))
+      : categories;
+
     // DishModifierGroup 只是挂载关系的中间表，前端点餐界面只关心"这道菜挂了哪些选项组模板"，
     // 这里拍平掉中间表那一层，只留 group 本身
-    return categories.map((category) => ({
+    return visible.map((category) => ({
       ...category,
       dishes: category.dishes.map((dish) => {
         const { modifierGroups, ...rest } = dish;
@@ -106,11 +116,16 @@ export class MenuService {
   }
 
   createCategory(dto: UpsertCategoryDto) {
-    return this.prisma.category.create({ data: { name: dto.name, sortOrder: dto.sortOrder ?? 0 } });
+    return this.prisma.category.create({
+      data: { name: dto.name, sortOrder: dto.sortOrder ?? 0, menuProfileIds: dto.menuProfileIds ?? [] },
+    });
   }
 
   updateCategory(id: string, dto: UpsertCategoryDto) {
-    return this.prisma.category.update({ where: { id }, data: { name: dto.name, sortOrder: dto.sortOrder } });
+    return this.prisma.category.update({
+      where: { id },
+      data: { name: dto.name, sortOrder: dto.sortOrder, menuProfileIds: dto.menuProfileIds },
+    });
   }
 
   async deleteCategory(id: string) {
