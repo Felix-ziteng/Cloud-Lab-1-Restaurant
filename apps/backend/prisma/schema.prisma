@@ -220,8 +220,11 @@ model OrderItem {
   id                String        @id @default(uuid())
   orderId           String
   order             Order         @relation(fields: [orderId], references: [id])
-  dishId            String
-  dish              Dish          @relation(fields: [dishId], references: [id])
+  // 菜品可能之后被商家删除（即便已经被下过单）——name/price 早就快照在下面两个字段里，
+  // 历史订单不依赖这个外键展示内容，删除菜品时把它置空即可（onDelete: SetNull），
+  // 不需要像以前那样禁止删除已下过单的菜品
+  dishId            String?
+  dish              Dish?         @relation(fields: [dishId], references: [id], onDelete: SetNull)
   dishNameSnapshot  String
   unitPriceSnapshot Decimal       @db.Decimal(10, 2)
   quantity          Int

@@ -248,7 +248,8 @@ function MenuManagement({ config }: { config: StoreConfig }) {
     });
   }
 
-  async function deleteCategory(id: string) {
+  async function deleteCategory(id: string, name: string) {
+    if (!window.confirm(`确定要删除分类「${name}」吗？此操作不能撤销。`)) return;
     await run(() => api.delete(`/categories/${id}`, 'staffToken'));
   }
 
@@ -303,7 +304,8 @@ function MenuManagement({ config }: { config: StoreConfig }) {
     });
   }
 
-  async function deleteDish(id: string) {
+  async function deleteDish(id: string, name: string) {
+    if (!window.confirm(`确定要删除菜品「${name}」吗？此操作不能撤销。`)) return;
     await run(() => api.delete(`/dishes/${id}`, 'staffToken'));
   }
 
@@ -430,7 +432,7 @@ function MenuManagement({ config }: { config: StoreConfig }) {
                     <Button variant="ghost" size="sm" onClick={() => startEditCategory(category)}>
                       编辑
                     </Button>
-                    <Button variant="ghost" size="sm" onClick={() => deleteCategory(category.id)}>
+                    <Button variant="ghost" size="sm" onClick={() => deleteCategory(category.id, category.name)}>
                       删除分类
                     </Button>
                   </div>
@@ -550,7 +552,7 @@ function MenuManagement({ config }: { config: StoreConfig }) {
                             <Button variant="ghost" size="sm" onClick={() => startEditDish(dish)}>
                               编辑
                             </Button>
-                            <Button variant="ghost" size="sm" onClick={() => deleteDish(dish.id)}>
+                            <Button variant="ghost" size="sm" onClick={() => deleteDish(dish.id, dish.name)}>
                               删除
                             </Button>
                           </div>
@@ -860,7 +862,8 @@ function ModifierGroupManagement({ groups, onChanged }: { groups: ModifierGroup[
     });
   }
 
-  async function deleteGroup(id: string) {
+  async function deleteGroup(id: string, name: string) {
+    if (!window.confirm(`确定要删除选项组「${name}」吗？此操作不能撤销。`)) return;
     await run(() => api.delete(`/modifier-groups/${id}`, 'staffToken'));
   }
 
@@ -932,7 +935,7 @@ function ModifierGroupManagement({ groups, onChanged }: { groups: ModifierGroup[
                   <Button variant="ghost" size="sm" onClick={() => startEditGroup(group)}>
                     编辑
                   </Button>
-                  <Button variant="ghost" size="sm" onClick={() => deleteGroup(group.id)}>
+                  <Button variant="ghost" size="sm" onClick={() => deleteGroup(group.id, group.name)}>
                     删除
                   </Button>
                 </div>
@@ -1170,7 +1173,8 @@ function MenuProfileManagement({ profiles, onChanged }: { profiles: MenuProfile[
     });
   }
 
-  async function deleteProfile(id: string) {
+  async function deleteProfile(id: string, name: string) {
+    if (!window.confirm(`确定要删除菜单版本「${name}」吗？此操作不能撤销。`)) return;
     await run(() => api.delete(`/menu-profiles/${id}`, 'staffToken'));
   }
 
@@ -1254,7 +1258,7 @@ function MenuProfileManagement({ profiles, onChanged }: { profiles: MenuProfile[
                   <Button variant="ghost" size="sm" onClick={() => startEditProfile(profile)}>
                     编辑
                   </Button>
-                  <Button variant="ghost" size="sm" onClick={() => deleteProfile(profile.id)}>
+                  <Button variant="ghost" size="sm" onClick={() => deleteProfile(profile.id, profile.name)}>
                     删除
                   </Button>
                 </div>
@@ -1348,7 +1352,8 @@ function TableManagement() {
     });
   }
 
-  async function deleteTable(id: string) {
+  async function deleteTable(id: string, tableNumber: string) {
+    if (!window.confirm(`确定要删除桌台「${tableNumber}」吗？此操作不能撤销。`)) return;
     await run(() => api.delete(`/tables/${id}`, 'staffToken'));
   }
 
@@ -1445,7 +1450,7 @@ function TableManagement() {
                       <Button
                         variant="ghost"
                         size="sm"
-                        onClick={() => deleteTable(table.id)}
+                        onClick={() => deleteTable(table.id, table.tableNumber)}
                         disabled={table.status !== 'idle'}
                       >
                         删除

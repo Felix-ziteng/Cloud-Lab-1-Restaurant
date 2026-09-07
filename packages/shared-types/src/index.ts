@@ -108,7 +108,7 @@ export type KitchenStatus = "pending" | "preparing" | "done";
 export interface OrderItem {
   id: string;
   orderId: string;
-  dishId: string;
+  dishId: string | null;
   dishNameSnapshot: string;
   unitPriceSnapshot: string;
   quantity: number;

@@ -100,13 +100,9 @@ export class MenuService {
     const dish = await this.prisma.dish.findUnique({ where: { id } });
     if (!dish) throw new NotFoundException('菜品不存在');
 
-    // 已经被下过单的菜品，订单项还挂着这道菜的外键，硬删会破坏历史订单——
-    // 用"下架"就够了，删除只留给从没被点过的菜。提示文案要跟前端按钮的字一致，不然用户找不到
-    const orderedCount = await this.prisma.orderItem.count({ where: { dishId: id } });
-    if (orderedCount > 0) {
-      throw new ConflictException('该菜品已经有历史订单记录，不能删除，请点旁边的"下架"按钮');
-    }
-
+    // 历史订单项不依赖这道菜的外键展示——名称/单价早就快照在 OrderItem.dishNameSnapshot/
+    // unitPriceSnapshot 里了，删除菜品时数据库会把已有订单项的 dishId 置空（onDelete: SetNull），
+    // 历史订单显示不受影响，所以允许直接删除，不再要求先"下架"
     return this.prisma.dish.delete({ where: { id } });
   }
 
