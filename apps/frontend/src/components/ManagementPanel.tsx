@@ -635,8 +635,64 @@ const emptyModifierGroupDraft: ModifierGroupDraft = {
   options: [{ label: '', priceDelta: '' }],
 };
 
+// 选项组草稿里"选项"这一部分的增删改，独立成组件（而不是嵌套定义在 ModifierGroupManagement
+// 里面）——嵌套定义每次父组件渲染都会创建一个新的函数/组件身份，React 会当成不同的组件类型，
+// 卸载重装整棵子树，导致里面的 <Input> 每敲一个字就被卸载重建、丢失焦点，表现为"只能打一个字"
+function OptionRows({
+  draft,
+  setDraft,
+}: {
+  draft: ModifierGroupDraft;
+  setDraft: (d: ModifierGroupDraft) => void;
+}) {
+  return (
+    <div className="flex flex-col gap-1.5">
+      {draft.options.map((option, index) => (
+        <div key={index} className="flex items-center gap-2">
+          <Input
+            placeholder="选项名称，比如「加鸡蛋」"
+            className="max-w-40"
+            value={option.label}
+            onChange={(e) => {
+              const options = draft.options.map((o, i) => (i === index ? { ...o, label: e.target.value } : o));
+              setDraft({ ...draft, options });
+            }}
+          />
+          <Input
+            placeholder="加价（可选，默认0）"
+            type="number"
+            className="w-32"
+            value={option.priceDelta}
+            onChange={(e) => {
+              const options = draft.options.map((o, i) => (i === index ? { ...o, priceDelta: e.target.value } : o));
+              setDraft({ ...draft, options });
+            }}
+          />
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            onClick={() => setDraft({ ...draft, options: draft.options.filter((_, i) => i !== index) })}
+          >
+            删除选项
+          </Button>
+        </div>
+      ))}
+      <Button
+        type="button"
+        variant="outline"
+        size="sm"
+        className="w-fit"
+        onClick={() => setDraft({ ...draft, options: [...draft.options, { label: '', priceDelta: '' }] })}
+      >
+        + 加一个选项
+      </Button>
+    </div>
+  );
+}
+
 // 门店级"选项组模板"管理（选面型、加料这类）：不预设内容，商家自己建，建好了在上面
-// 菜品管理的表单里勾选适用哪些菜（见 MenuManagement 里的 modifierGroupIds）
+// 菜单管理的表单里勾选适用哪些菜（见 MenuManagement 里的 modifierGroupIds）
 function ModifierGroupManagement({ groups, onChanged }: { groups: ModifierGroup[]; onChanged: () => void }) {
   const [error, setError] = useState<string | null>(null);
   const [newGroup, setNewGroup] = useState<ModifierGroupDraft>(emptyModifierGroupDraft);
@@ -698,59 +754,6 @@ function ModifierGroupManagement({ groups, onChanged }: { groups: ModifierGroup[
 
   async function deleteGroup(id: string) {
     await run(() => api.delete(`/modifier-groups/${id}`, 'staffToken'));
-  }
-
-  function OptionRows({
-    draft,
-    setDraft,
-  }: {
-    draft: ModifierGroupDraft;
-    setDraft: (d: ModifierGroupDraft) => void;
-  }) {
-    return (
-      <div className="flex flex-col gap-1.5">
-        {draft.options.map((option, index) => (
-          <div key={index} className="flex items-center gap-2">
-            <Input
-              placeholder="选项名称，比如「加鸡蛋」"
-              className="max-w-40"
-              value={option.label}
-              onChange={(e) => {
-                const options = draft.options.map((o, i) => (i === index ? { ...o, label: e.target.value } : o));
-                setDraft({ ...draft, options });
-              }}
-            />
-            <Input
-              placeholder="加价（可选，默认0）"
-              type="number"
-              className="w-32"
-              value={option.priceDelta}
-              onChange={(e) => {
-                const options = draft.options.map((o, i) => (i === index ? { ...o, priceDelta: e.target.value } : o));
-                setDraft({ ...draft, options });
-              }}
-            />
-            <Button
-              type="button"
-              variant="ghost"
-              size="sm"
-              onClick={() => setDraft({ ...draft, options: draft.options.filter((_, i) => i !== index) })}
-            >
-              删除选项
-            </Button>
-          </div>
-        ))}
-        <Button
-          type="button"
-          variant="outline"
-          size="sm"
-          className="w-fit"
-          onClick={() => setDraft({ ...draft, options: [...draft.options, { label: '', priceDelta: '' }] })}
-        >
-          + 加一个选项
-        </Button>
-      </div>
-    );
   }
 
   return (
